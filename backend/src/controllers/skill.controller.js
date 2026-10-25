@@ -24,10 +24,18 @@ export const getSkillOverview = async (req, res, next) => {
       status: 'success',
       data: {
         overallScore: analytics.overallScore,
+        readinessPercentage: analytics.readinessPercentage,
+        targetRole: analytics.targetRole,
+        completedSessionsCount: analytics.completedSessionsCount,
+        narrativeSummary: analytics.narrativeSummary,
         totalEvaluatedQuestions: analytics.totalEvaluatedQuestions,
         evaluatedTopicsCount: analytics.evaluatedTopicsCount,
         counts: analytics.counts,
         categoryBreakdown: analytics.categoryBreakdown,
+        weakestTopics: analytics.weakestTopics,
+        strongestTopics: analytics.strongestTopics,
+        requiredSkills: analytics.requiredSkills,
+        scoreHistory: analytics.scoreHistory,
         topRecommendations: analytics.topRecommendations,
         recentActivity: analytics.recentActivity
       }
@@ -52,14 +60,22 @@ export const getSkillGaps = async (req, res, next) => {
       status: 'success',
       data: {
         overallScore: analytics.overallScore,
+        readinessPercentage: analytics.readinessPercentage,
+        targetRole: analytics.targetRole,
+        completedSessionsCount: analytics.completedSessionsCount,
+        narrativeSummary: analytics.narrativeSummary,
         totalEvaluatedQuestions: analytics.totalEvaluatedQuestions,
         strong: analytics.strong,
         developing: analytics.developing,
         needsImprovement: analytics.needsImprovement,
         insufficientEvidence: analytics.insufficientEvidence,
         allTopics: analytics.allTopics,
+        weakestTopics: analytics.weakestTopics,
+        strongestTopics: analytics.strongestTopics,
+        requiredSkills: analytics.requiredSkills,
         categoryBreakdown: analytics.categoryBreakdown,
-        topRecommendations: analytics.topRecommendations
+        topRecommendations: analytics.topRecommendations,
+        scoreHistory: analytics.scoreHistory
       }
     });
   } catch (error) {

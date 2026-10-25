@@ -5,6 +5,7 @@ import { executeCode as executeCodeService } from '../services/codeExecution.ser
 import { INTERVIEW_CATALOG, normalizeCategory } from '../config/interviewCatalog.js';
 import { normalizeQuestionText } from '../utils/textNormalize.js';
 import { evaluationQueue } from '../services/evaluationQueue.js';
+import { updateUserSkillProfile } from '../services/skillGap.service.js';
 
 const SUPPORTED_CATEGORIES = INTERVIEW_CATALOG.categories.map(c => c.id);
 
@@ -731,6 +732,11 @@ export const submitAnswer = async (req, res, next) => {
       const roleStr = interview.targetRole ? ` for ${interview.targetRole}` : '';
       const levelStr = interview.experienceLevel ? ` (${interview.experienceLevel.toUpperCase()})` : '';
       interview.feedbackSummary = `Completed ${interview.category} (${interview.difficulty})${roleStr}${levelStr} mock interview with an overall score of ${interview.finalScore}%.`;
+
+      // Trigger deterministic SkillProfile update in background
+      updateUserSkillProfile(interview.userId, interview.targetRole).catch(err => {
+        console.warn('[Interview Controller] SkillProfile update notice:', err.message);
+      });
     } else {
       interview.sessionState = 'awaiting_answer';
       // If adaptive difficulty changed, update difficulty for next question if un-answered

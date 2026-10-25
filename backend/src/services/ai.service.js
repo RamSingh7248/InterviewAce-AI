@@ -72,7 +72,7 @@ const unwrapJsonQuestions = (data) => {
 /**
  * Helper to call Gemini API with multi-model fallback, timeout, and retries
  */
-const callGemini = async (prompt, systemInstruction = '', timeoutMs = 15000) => {
+export const callGemini = async (prompt, systemInstruction = '', timeoutMs = 15000) => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey.trim().length < 10) {
     throw new Error('GEMINI_API_KEY is not configured or invalid.');

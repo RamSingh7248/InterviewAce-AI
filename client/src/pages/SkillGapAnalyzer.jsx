@@ -1,14 +1,33 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-
 import api from '../services/api';
 import UserMenu from '../components/UserMenu';
 import Button from '../components/ui/Button';
-import { ArrowLeft, ArrowRight, Target, Award, AlertTriangle, TrendingUp, TrendingDown, Minus, HelpCircle, Loader2, RefreshCw, BookOpen, Zap, Clock } from 'lucide-react';
+import { 
+  ArrowLeft, 
+  ArrowRight, 
+  Target, 
+  Award, 
+  AlertTriangle, 
+  TrendingUp, 
+  TrendingDown, 
+  Minus, 
+  HelpCircle, 
+  Loader2, 
+  RefreshCw, 
+  BookOpen, 
+  Zap, 
+  Clock,
+  Sparkles,
+  BarChart3,
+  CheckCircle2,
+  Lock,
+  Layers
+} from 'lucide-react';
 import '../styles/auth.css';
 
-// Circular Score Component for overall score
-const CircularScore = ({ score, size = 150 }) => {
+// Circular Score Component
+const CircularGauge = ({ score, size = 130, label = 'Readiness' }) => {
   if (score === null || score === undefined) {
     return (
       <div style={{
@@ -23,18 +42,16 @@ const CircularScore = ({ score, size = 150 }) => {
         margin: '0 auto',
         backgroundColor: 'var(--bg-card-subtle)'
       }}>
-        <HelpCircle size={28} style={{ color: 'var(--text-muted)', marginBottom: '4px' }} />
-        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textAlign: 'center', padding: '0 8px' }}>
-          No Data
-        </span>
+        <HelpCircle size={24} style={{ color: 'var(--text-muted)', marginBottom: '4px' }} />
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>No Data</span>
       </div>
     );
   }
 
-  const radius = (size - 18) / 2;
+  const radius = (size - 16) / 2;
   const circumference = 2 * Math.PI * radius;
   const filled = (score / 100) * circumference;
-  const color = score >= 75 ? 'var(--success-text, #22c55e)' : score >= 60 ? 'var(--warning-text, #eab308)' : 'var(--error-text, #ef4444)';
+  const color = score >= 75 ? '#22c55e' : score >= 50 ? '#eab308' : '#ef4444';
 
   return (
     <div style={{ position: 'relative', width: `${size}px`, height: `${size}px`, margin: '0 auto' }}>
@@ -70,42 +87,64 @@ const CircularScore = ({ score, size = 150 }) => {
         alignItems: 'center',
         justifyContent: 'center'
       }}>
-        <span style={{ fontSize: '2.1rem', fontWeight: 800, color, lineHeight: 1 }}>
-          {score}
+        <span style={{ fontSize: '1.9rem', fontWeight: 800, color, lineHeight: 1 }}>
+          {score}%
         </span>
-        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-          Overall / 100
+        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '4px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+          {label}
         </span>
       </div>
     </div>
   );
 };
 
-// Horizontal Score Bar
-const ScoreBar = ({ score, classification }) => {
-  if (score === null || score === undefined) {
+// Trend Icon helper
+const TrendBadge = ({ trend }) => {
+  if (trend === 'improving') {
     return (
-      <div style={{ flex: 1, height: '8px', backgroundColor: 'var(--border-subtle)', borderRadius: '4px' }} />
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#22c55e', fontSize: '0.75rem', fontWeight: 600 }}>
+        <TrendingUp size={14} /> Improving
+      </span>
     );
   }
+  if (trend === 'declining') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#ef4444', fontSize: '0.75rem', fontWeight: 600 }}>
+        <TrendingDown size={14} /> Declining
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 500 }}>
+      <Minus size={14} /> Steady
+    </span>
+  );
+};
 
-  const color = score >= 75 ? 'var(--success-text, #22c55e)' : score >= 60 ? 'var(--warning-text, #eab308)' : 'var(--error-text, #ef4444)';
+// Mastery Badge Helper
+const MasteryBadge = ({ label }) => {
+  const styles = {
+    Strong: { bg: 'rgba(34, 197, 94, 0.15)', border: 'rgba(34, 197, 94, 0.3)', color: '#22c55e' },
+    Proficient: { bg: 'rgba(56, 189, 248, 0.15)', border: 'rgba(56, 189, 248, 0.3)', color: '#38bdf8' },
+    Developing: { bg: 'rgba(234, 179, 8, 0.15)', border: 'rgba(234, 179, 8, 0.3)', color: '#eab308' },
+    Beginner: { bg: 'rgba(239, 68, 68, 0.15)', border: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }
+  }[label] || { bg: 'var(--bg-subtle)', border: 'var(--border-subtle)', color: 'var(--text-muted)' };
 
   return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
-      <div style={{ flex: 1, height: '8px', backgroundColor: 'var(--border-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
-        <div style={{
-          width: `${Math.min(100, Math.max(5, score))}%`,
-          height: '100%',
-          backgroundColor: color,
-          borderRadius: '4px',
-          transition: 'width 0.6s ease'
-        }} />
-      </div>
-      <span style={{ fontSize: '0.9rem', fontWeight: 700, color, minWidth: '45px', textAlign: 'right' }}>
-        {score}%
-      </span>
-    </div>
+    <span style={{
+      display: 'inline-block',
+      padding: '2px 8px',
+      borderRadius: '4px',
+      fontSize: '0.72rem',
+      fontWeight: 700,
+      backgroundColor: styles.bg,
+      border: `1px solid ${styles.border}`,
+      color: styles.color,
+      textTransform: 'uppercase',
+      letterSpacing: '0.04em'
+    }}>
+      {label}
+    </span>
   );
 };
 
@@ -117,7 +156,7 @@ const SkillGapAnalyzer = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [filterTab, setFilterTab] = useState('all'); // 'all' | 'gaps' | 'developing' | 'strong'
+  const [activeTab, setActiveTab] = useState('weakest'); // 'weakest' | 'strongest' | 'all'
 
   const fetchAnalytics = useCallback(async () => {
     try {
@@ -148,20 +187,10 @@ const SkillGapAnalyzer = () => {
     fetchAnalytics();
   }, [fetchAnalytics]);
 
-  // Derive categories list from breakdown
-  const availableCategories = overview?.categoryBreakdown?.map(c => c.category) || [];
-
-  // Filter topics by selected tab
-  const getFilteredTopics = () => {
-    if (!gaps) return [];
-    if (filterTab === 'gaps') return gaps.needsImprovement || [];
-    if (filterTab === 'developing') return gaps.developing || [];
-    if (filterTab === 'strong') return gaps.strong || [];
-    return gaps.allTopics || [];
-  };
-
-  const filteredTopics = getFilteredTopics();
-  const hasEvaluatedData = (overview?.totalEvaluatedQuestions || 0) > 0;
+  const completedSessionsCount = overview?.completedSessionsCount || 0;
+  const isEarlyStage = completedSessionsCount < 2;
+  const targetRole = overview?.targetRole || 'Software Engineer';
+  const readinessPercentage = overview?.readinessPercentage || 0;
 
   return (
     <div style={{
@@ -199,8 +228,6 @@ const SkillGapAnalyzer = () => {
               borderRadius: '6px',
               transition: 'background-color var(--transition-fast)'
             }}
-            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-subtle)'}
-            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
           >
             <ArrowLeft size={16} /> <span>Dashboard</span>
           </Link>
@@ -228,13 +255,13 @@ const SkillGapAnalyzer = () => {
       </header>
 
       {/* Main Content Workspace */}
-      <main style={{ maxWidth: '1080px', margin: '0 auto', padding: '28px 20px 64px 20px' }}>
+      <main style={{ maxWidth: '1100px', margin: '0 auto', padding: '28px 20px 64px 20px' }}>
         
         {/* Banner Section */}
         <section style={{
           backgroundColor: 'var(--bg-surface)',
           border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-lg, 12px)',
+          borderRadius: '14px',
           padding: '24px 28px',
           marginBottom: '24px',
           display: 'flex',
@@ -242,8 +269,7 @@ const SkillGapAnalyzer = () => {
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '20px',
-          boxShadow: 'var(--shadow-card)',
-          transition: 'all var(--transition-fast)'
+          boxShadow: 'var(--shadow-card)'
         }}>
           <div style={{ maxWidth: '640px' }}>
             <div style={{
@@ -260,7 +286,7 @@ const SkillGapAnalyzer = () => {
               marginBottom: '10px'
             }}>
               <Target size={13} />
-              <span>Evidence-Based Proficiency Engine</span>
+              <span>Deterministic EMA &amp; Role Requirements Engine</span>
             </div>
 
             <h1 style={{
@@ -280,7 +306,8 @@ const SkillGapAnalyzer = () => {
               fontSize: '0.9rem',
               lineHeight: 1.55
             }}>
-              Analyzed directly from your evaluated mock interview history. Scores reflect difficulty weighting, technical accuracy, and specific missing concepts.
+              Target Role: <strong style={{ color: 'var(--text-primary)' }}>{targetRole}</strong>.
+              All proficiencies calculated via Exponential Moving Averages (EMA) with strict objective thresholds.
             </p>
           </div>
 
@@ -289,88 +316,21 @@ const SkillGapAnalyzer = () => {
               variant="outline"
               onClick={fetchAnalytics}
               disabled={loading}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                height: '40px',
-                padding: '0 14px',
-                fontSize: '0.85rem'
-              }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-              <span>Refresh Analysis</span>
+              <span>Refresh</span>
             </Button>
             <Button
               variant="primary"
               onClick={() => navigate('/interview/setup')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                height: '40px',
-                padding: '0 18px',
-                fontSize: '0.85rem'
-              }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
             >
               <span>Practice New Mock</span>
               <ArrowRight size={15} />
             </Button>
           </div>
         </section>
-
-        {/* Category Filter Pills (if multiple categories available) */}
-        {availableCategories.length > 0 && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '20px',
-            overflowX: 'auto',
-            paddingBottom: '4px'
-          }}>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginRight: '4px' }}>
-              Filter:
-            </span>
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('')}
-              style={{
-                padding: '5px 12px',
-                borderRadius: '20px',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                border: !selectedCategory ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
-                backgroundColor: !selectedCategory ? 'var(--primary-subtle)' : 'var(--bg-surface)',
-                color: !selectedCategory ? 'var(--primary-text)' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              All Subjects ({overview?.totalEvaluatedQuestions || 0} Qs)
-            </button>
-            {overview?.categoryBreakdown?.map(cat => (
-              <button
-                key={cat.category}
-                type="button"
-                onClick={() => setSelectedCategory(cat.category)}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: '20px',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  border: selectedCategory === cat.category ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
-                  backgroundColor: selectedCategory === cat.category ? 'var(--primary-subtle)' : 'var(--bg-surface)',
-                  color: selectedCategory === cat.category ? 'var(--primary-text)' : 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                {cat.category} ({cat.questionsCount} Qs)
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Loading State */}
         {loading && (
@@ -384,7 +344,7 @@ const SkillGapAnalyzer = () => {
           }}>
             <Loader2 size={36} className="animate-spin" style={{ margin: '0 auto 16px auto', color: 'var(--primary)' }} />
             <p style={{ margin: 0, fontSize: '0.95rem', fontWeight: 500 }}>
-              Synthesizing evaluated interview responses and skill proficiency...
+              Calculating Exponential Moving Averages and target role readiness...
             </p>
           </div>
         )}
@@ -412,501 +372,414 @@ const SkillGapAnalyzer = () => {
           </div>
         )}
 
-        {/* Empty State: No Practice History */}
-        {!loading && !error && !hasEvaluatedData && (
+        {/* Informative Early Stage / Empty State (Need at least 2 sessions for reliable readiness) */}
+        {!loading && !error && isEarlyStage && (
           <div style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
+            backgroundColor: 'rgba(234, 179, 8, 0.08)',
+            border: '1px solid rgba(234, 179, 8, 0.3)',
             borderRadius: '14px',
-            padding: '48px 24px',
-            textAlign: 'center',
+            padding: '24px 28px',
+            marginBottom: '24px',
             boxShadow: 'var(--shadow-card)'
           }}>
-            <div style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '50%',
-              backgroundColor: 'var(--primary-subtle)',
-              color: 'var(--primary-text)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px auto'
-            }}>
-              <BookOpen size={28} />
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#eab308', fontWeight: 700, fontSize: '0.95rem', marginBottom: '6px' }}>
+                  <Lock size={18} /> Preliminary Baseline Stage ({completedSessionsCount}/2 Sessions Completed)
+                </div>
+                <p style={{ margin: '0 0 12px 0', fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.5, maxWidth: '650px' }}>
+                  A reliable role readiness profile requires at least <strong>2 completed interview sessions</strong>. 
+                  {completedSessionsCount === 0 
+                    ? ' You have not completed any sessions yet. Take your first interview to establish your technical baseline.'
+                    : ' You have completed 1 session. Complete 1 more mock interview to unlock full target role readiness ratings and topic mastery trends.'}
+                </p>
+                {/* Visual Progress Bar */}
+                <div style={{ width: '220px', height: '8px', backgroundColor: 'rgba(234, 179, 8, 0.2)', borderRadius: '4px', overflow: 'hidden', marginBottom: '16px' }}>
+                  <div style={{ width: `${(completedSessionsCount / 2) * 100}%`, height: '100%', backgroundColor: '#eab308', borderRadius: '4px', transition: 'width 0.4s ease' }} />
+                </div>
+              </div>
+              <Button
+                variant="primary"
+                onClick={() => navigate('/interview/setup')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+              >
+                <span>{completedSessionsCount === 0 ? 'Start Diagnostic Session' : 'Complete 2nd Session'}</span>
+                <ArrowRight size={15} />
+              </Button>
             </div>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: '0 0 8px 0', color: 'var(--text-primary)' }}>
-              No Practice Evidence Recorded Yet
-            </h2>
-            <p style={{
-              color: 'var(--text-secondary)',
-              maxWidth: '520px',
-              margin: '0 auto 24px auto',
-              fontSize: '0.92rem',
-              lineHeight: 1.6
-            }}>
-              The Skill Gap Analyzer requires at least one evaluated interview to generate proficiency estimates, identify your critical weaknesses, and recommend targeted practice.
-            </p>
-            <Button
-              variant="primary"
-              onClick={() => navigate('/interview/setup')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '0 24px',
-                height: '44px',
-                fontSize: '0.92rem'
-              }}
-            >
-              <span>Start Your First Practice Mock</span>
-              <ArrowRight size={16} />
-            </Button>
           </div>
         )}
 
         {/* Populated Analytics View */}
-        {!loading && !error && hasEvaluatedData && (
+        {!loading && !error && (
           <>
-            {/* Top Metric Cards Grid */}
+            {/* Top Grid: Role Readiness & Narrative Summary */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-              gap: '16px',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+              gap: '20px',
               marginBottom: '24px'
             }}>
-              
-              {/* Overall Proficiency Card */}
+              {/* Card 1: Role Readiness % */}
               <div style={{
                 backgroundColor: 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
-                borderRadius: '12px',
-                padding: '20px',
+                borderRadius: '14px',
+                padding: '24px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '16px',
+                gap: '20px',
                 boxShadow: 'var(--shadow-card)'
               }}>
-                <CircularScore score={overview?.overallScore} size={90} />
+                <CircularGauge score={readinessPercentage} size={110} label="Readiness" />
                 <div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
-                    Proficiency Index
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Target Role Readiness
                   </div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', margin: '4px 0 2px 0' }}>
-                    {overview?.overallScore !== null ? `${overview?.overallScore}%` : 'Not enough data'}
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', margin: '4px 0 2px 0' }}>
+                    {targetRole}
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                    Calculated from {overview?.evaluatedTopicsCount || 0} evaluated topics
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    {readinessPercentage >= 75 ? 'Qualified for interview rounds' : readinessPercentage >= 50 ? 'Developing core competency' : 'Foundational skills in progress'}
+                  </div>
+                  <div style={{ marginTop: '8px', fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                    Based on {overview?.totalEvaluatedQuestions || 0} evaluated questions
                   </div>
                 </div>
               </div>
 
-              {/* Strong Skills Card */}
+              {/* Card 2: Executive AI Narrative Summary */}
               <div style={{
                 backgroundColor: 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
-                borderRadius: '12px',
-                padding: '20px',
-                boxShadow: 'var(--shadow-card)'
+                borderRadius: '14px',
+                padding: '24px',
+                boxShadow: 'var(--shadow-card)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
-                    Strong Skills (75%+)
-                  </span>
-                  <Award size={18} style={{ color: 'var(--success-text)' }} />
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                    <Sparkles size={16} color="#818cf8" />
+                    <span style={{ fontSize: '0.78rem', color: '#818cf8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Executive Summary &amp; Priority Guidance
+                    </span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.92rem', color: 'var(--text-primary)', lineHeight: 1.6, fontStyle: 'italic' }}>
+                    "{overview?.narrativeSummary || 'Complete 2 mock interview sessions to unlock tailored executive insights and topic recommendations.'}"
+                  </p>
                 </div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--success-text)', lineHeight: 1.2 }}>
-                  {overview?.counts?.strong || 0}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '6px' }}>
-                  Topics demonstrated with consistent accuracy
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  <span>Overall EMA Score: <strong>{overview?.overallScore || 0}%</strong></span>
+                  <span>Evaluated Topics: <strong>{overview?.evaluatedTopicsCount || 0}</strong></span>
                 </div>
               </div>
-
-              {/* Critical Gaps Card */}
-              <div style={{
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '12px',
-                padding: '20px',
-                boxShadow: 'var(--shadow-card)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
-                    Critical Gaps (&lt;60%)
-                  </span>
-                  <AlertTriangle size={18} style={{ color: 'var(--error-text)' }} />
-                </div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--error-text)', lineHeight: 1.2 }}>
-                  {overview?.counts?.needsImprovement || 0}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '6px' }}>
-                  High priority areas needing focused practice
-                </div>
-              </div>
-
-              {/* Developing Skills Card */}
-              <div style={{
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '12px',
-                padding: '20px',
-                boxShadow: 'var(--shadow-card)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
-                    Developing (60–74%)
-                  </span>
-                  <TrendingUp size={18} style={{ color: 'var(--warning-text)' }} />
-                </div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--warning-text)', lineHeight: 1.2 }}>
-                  {overview?.counts?.developing || 0}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '6px' }}>
-                  Skills requiring refinement of edge cases
-                </div>
-              </div>
-
             </div>
 
-            {/* Targeted Practice Recommendations (Grounded in Real Missing Concepts) */}
-            {overview?.topRecommendations?.length > 0 && (
+            {/* Category Breakdown Bar Chart */}
+            {overview?.categoryBreakdown && overview.categoryBreakdown.length > 0 && (
               <section style={{
                 backgroundColor: 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
-                borderRadius: '12px',
+                borderRadius: '14px',
                 padding: '24px',
                 marginBottom: '24px',
                 boxShadow: 'var(--shadow-card)'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                  <Zap size={18} style={{ color: 'var(--warning-text)' }} />
-                  <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                    Priority Practice Recommendations
-                  </h2>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <BarChart3 size={18} color="var(--primary-text)" />
+                    <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                      Category Proficiency Breakdown (EMA)
+                    </h2>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Weighted by recency &amp; difficulty
+                  </span>
                 </div>
 
-                <div style={{ display: 'grid', gap: '12px' }}>
-                  {overview.topRecommendations.map((rec, idx) => (
-                    <div
-                      key={idx}
-                      style={{
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+                  {overview.categoryBreakdown.map((cat, idx) => {
+                    const score = cat.averageScore || cat.emaScore || 0;
+                    const color = score >= 85 ? '#22c55e' : score >= 70 ? '#38bdf8' : score >= 50 ? '#eab308' : '#ef4444';
+                    return (
+                      <div key={idx} style={{
                         backgroundColor: 'var(--bg-card-subtle)',
                         border: '1px solid var(--border-subtle)',
-                        borderRadius: '8px',
-                        padding: '16px 20px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        flexWrap: 'wrap',
-                        gap: '14px'
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: '280px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                          <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                            {rec.skillName}
+                        borderRadius: '10px',
+                        padding: '14px 18px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                            {cat.category}
                           </span>
-                          <span style={{
-                            fontSize: '0.72rem',
-                            padding: '2px 7px',
-                            borderRadius: '4px',
-                            backgroundColor: 'var(--bg-subtle)',
-                            color: 'var(--text-muted)',
-                            fontWeight: 600
-                          }}>
-                            {rec.category}
-                          </span>
-                          <span style={{
-                            fontSize: '0.7rem',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            fontWeight: 700,
-                            backgroundColor: rec.priority === 'high' ? 'var(--error-subtle)' : 'var(--warning-subtle)',
-                            color: rec.priority === 'high' ? 'var(--error-text)' : 'var(--warning-text)'
-                          }}>
-                            {rec.priority === 'high' ? 'Critical Gap' : 'Target Area'}
-                          </span>
-                        </div>
-
-                        <p style={{ margin: '4px 0', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-                          {rec.recommendedAction}
-                        </p>
-
-                        {rec.missingConcepts?.length > 0 && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
-                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Missed Concepts:</span>
-                            {rec.missingConcepts.slice(0, 3).map((mc, mci) => (
-                              <span
-                                key={mci}
-                                style={{
-                                  fontSize: '0.7rem',
-                                  padding: '1px 6px',
-                                  borderRadius: '3px',
-                                  backgroundColor: 'var(--error-subtle)',
-                                  color: 'var(--error-text)'
-                                }}
-                              >
-                                {mc}
-                              </span>
-                            ))}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <MasteryBadge label={cat.masteryLabel || 'Beginner'} />
+                            <span style={{ fontWeight: 700, fontSize: '0.88rem', color }}>
+                              {score}%
+                            </span>
                           </div>
-                        )}
-                      </div>
-
-                      <Button
-                        variant="primary"
-                        onClick={() => navigate(rec.practiceUrl)}
-                        style={{
-                          height: '36px',
-                          padding: '0 14px',
-                          fontSize: '0.8rem',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        <span>Practice This Topic</span>
-                        <ArrowRight size={14} />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Topic-Wise Proficiency Breakdown */}
-            <section style={{
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '12px',
-              padding: '24px',
-              marginBottom: '24px',
-              boxShadow: 'var(--shadow-card)'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '12px',
-                borderBottom: '1px solid var(--border-subtle)',
-                paddingBottom: '16px',
-                marginBottom: '18px'
-              }}>
-                <div>
-                  <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '0 0 4px 0', color: 'var(--text-primary)' }}>
-                    Topic-Wise Skill Proficiency Breakdown
-                  </h2>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                    Evaluated answers weighted by question difficulty and recency
-                  </p>
-                </div>
-
-                {/* Filter Tabs */}
-                <div style={{
-                  display: 'flex',
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '6px',
-                  padding: '2px',
-                  gap: '2px'
-                }}>
-                  {[
-                    { id: 'all', label: `All (${gaps?.allTopics?.length || 0})` },
-                    { id: 'gaps', label: `Gaps (${gaps?.needsImprovement?.length || 0})` },
-                    { id: 'developing', label: `Developing (${gaps?.developing?.length || 0})` },
-                    { id: 'strong', label: `Strong (${gaps?.strong?.length || 0})` }
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setFilterTab(tab.id)}
-                      style={{
-                        padding: '4px 10px',
-                        border: 'none',
-                        borderRadius: '4px',
-                        fontSize: '0.75rem',
-                        fontWeight: filterTab === tab.id ? 700 : 500,
-                        backgroundColor: filterTab === tab.id ? 'var(--bg-surface)' : 'transparent',
-                        color: filterTab === tab.id ? 'var(--primary-text)' : 'var(--text-muted)',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {filteredTopics.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                  No skills match the selected filter.
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gap: '14px' }}>
-                  {filteredTopics.map((item, idx) => {
-                    const isConfirmed = item.confidence === 'confirmed';
-
-                    return (
-                      <div
-                        key={idx}
-                        style={{
-                          backgroundColor: 'var(--bg-card-subtle)',
-                          border: '1px solid var(--border-subtle)',
-                          borderRadius: '8px',
-                          padding: '16px 20px',
-                          transition: 'border-color var(--transition-fast)'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontWeight: 700, fontSize: '0.98rem', color: 'var(--text-primary)' }}>
-                                {item.skillName}
-                              </span>
-                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', padding: '1px 6px', backgroundColor: 'var(--bg-subtle)', borderRadius: '3px' }}>
-                                {item.category}
-                              </span>
-
-                              {/* Confidence Badge */}
-                              <span
-                                title={isConfirmed ? 'Evidence confirmed from 3 or more evaluations' : 'Preliminary baseline from 1-2 evaluations'}
-                                style={{
-                                  fontSize: '0.7rem',
-                                  padding: '1px 7px',
-                                  borderRadius: '9999px',
-                                  fontWeight: 600,
-                                  backgroundColor: isConfirmed ? 'var(--success-subtle)' : 'var(--warning-subtle)',
-                                  color: isConfirmed ? 'var(--success-text)' : 'var(--warning-text)'
-                                }}
-                              >
-                                {isConfirmed ? `✦ Confirmed (${item.evidenceCount} Qs)` : `Preliminary (${item.evidenceCount} Qs)`}
-                              </span>
-
-                              {/* Trend Indicator */}
-                              {item.trend === 'improving' && (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '0.7rem', color: 'var(--success-text)', fontWeight: 600 }}>
-                                  <TrendingUp size={13} /> Improving
-                                </span>
-                              )}
-                              {item.trend === 'declining' && (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '0.7rem', color: 'var(--error-text)', fontWeight: 600 }}>
-                                  <TrendingDown size={13} /> Declining
-                                </span>
-                              )}
-                              {item.trend === 'steady' && (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                                  <Minus size={13} /> Steady
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <Button
-                            variant="outline"
-                            onClick={() => navigate(item.practiceUrl)}
-                            style={{
-                              padding: '4px 10px',
-                              height: '30px',
-                              fontSize: '0.75rem',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                          >
-                            <span>Practice</span>
-                            <ArrowRight size={12} />
-                          </Button>
                         </div>
-
-                        {/* Proficiency Bar */}
-                        <div style={{ marginBottom: '8px' }}>
-                          <ScoreBar score={item.estimatedScore} classification={item.classification} />
+                        <div style={{ width: '100%', height: '8px', backgroundColor: 'var(--border-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(100, Math.max(5, score))}%`, height: '100%', backgroundColor: color, borderRadius: '4px', transition: 'width 0.5s ease' }} />
                         </div>
-
-                        {/* Missing Concepts or Strengths Chips */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          <div>
-                            {item.missingConcepts?.length > 0 ? (
-                              <span>
-                                <strong style={{ color: 'var(--error-text)' }}>Focus:</strong> {item.missingConcepts.join(', ')}
-                              </span>
-                            ) : item.strengths?.length > 0 ? (
-                              <span>
-                                <strong style={{ color: 'var(--success-text)' }}>Mastered:</strong> {item.strengths.join(', ')}
-                              </span>
-                            ) : (
-                              <span>{item.recommendedAction}</span>
-                            )}
-                          </div>
-                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                            Based on {item.evidenceCount} evaluated {item.evidenceCount === 1 ? 'question' : 'questions'}
-                          </span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                          <span>{cat.attempts || cat.questionsCount || 0} questions attempted</span>
+                          <TrendBadge trend={cat.trend || 'neutral'} />
                         </div>
                       </div>
                     );
                   })}
                 </div>
+              </section>
+            )}
+
+            {/* Ranked Weakest & Strongest Topics Tabs */}
+            <section style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '14px',
+              padding: '24px',
+              marginBottom: '24px',
+              boxShadow: 'var(--shadow-card)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '18px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '14px' }}>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('weakest')}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      fontSize: '0.88rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: activeTab === 'weakest' ? '2px solid #ef4444' : '1px solid var(--border-subtle)',
+                      backgroundColor: activeTab === 'weakest' ? 'rgba(239, 68, 68, 0.12)' : 'var(--bg-subtle)',
+                      color: activeTab === 'weakest' ? '#ef4444' : 'var(--text-secondary)'
+                    }}
+                  >
+                    Critical Skill Gaps ({overview?.weakestTopics?.length || 0})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('strongest')}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      fontSize: '0.88rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: activeTab === 'strongest' ? '2px solid #22c55e' : '1px solid var(--border-subtle)',
+                      backgroundColor: activeTab === 'strongest' ? 'rgba(34, 197, 94, 0.12)' : 'var(--bg-subtle)',
+                      color: activeTab === 'strongest' ? '#22c55e' : 'var(--text-secondary)'
+                    }}
+                  >
+                    Demonstrated Strengths ({overview?.strongestTopics?.length || 0})
+                  </button>
+                </div>
+
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Ranked by Exponential Moving Average (EMA)
+                </span>
+              </div>
+
+              {/* Weakest Topics List */}
+              {activeTab === 'weakest' && (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {overview?.weakestTopics && overview.weakestTopics.length > 0 ? (
+                    overview.weakestTopics.map((topic, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          backgroundColor: 'var(--bg-card-subtle)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '10px',
+                          padding: '16px 20px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '14px'
+                        }}
+                      >
+                        <div style={{ flex: '1 1 300px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)' }}>#{idx + 1}</span>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--primary-text)', fontWeight: 600, backgroundColor: 'var(--primary-subtle)', padding: '2px 6px', borderRadius: '4px' }}>
+                              {topic.category}
+                            </span>
+                            <MasteryBadge label={topic.masteryLabel || 'Beginner'} />
+                            <TrendBadge trend={topic.trend || 'neutral'} />
+                          </div>
+                          <h4 style={{ margin: '0 0 6px 0', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                            {topic.topic}
+                          </h4>
+                          {topic.missingConcepts && topic.missingConcepts.length > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                              <span style={{ fontSize: '0.72rem', color: '#ef4444', fontWeight: 600 }}>Missing:</span>
+                              {topic.missingConcepts.slice(0, 3).map((mis, mIdx) => (
+                                <span key={mIdx} style={{ fontSize: '0.7rem', color: 'var(--text-muted)', backgroundColor: 'rgba(239, 68, 68, 0.08)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                                  {mis}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: topic.emaScore >= 50 ? '#eab308' : '#ef4444' }}>
+                              {topic.emaScore}%
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              {topic.attempts} attempts
+                            </div>
+                          </div>
+
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => navigate(`/interview/setup?category=${encodeURIComponent(topic.category)}&topic=${encodeURIComponent(topic.topic)}`)}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                          >
+                            <span>Practice this now</span>
+                            <ArrowRight size={13} />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      No critical gaps recorded. Keep up the consistent practice!
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Strongest Topics List */}
+              {activeTab === 'strongest' && (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {overview?.strongestTopics && overview.strongestTopics.length > 0 ? (
+                    overview.strongestTopics.map((topic, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          backgroundColor: 'var(--bg-card-subtle)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '10px',
+                          padding: '16px 20px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '14px'
+                        }}
+                      >
+                        <div style={{ flex: '1 1 300px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)' }}>#{idx + 1}</span>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--primary-text)', fontWeight: 600, backgroundColor: 'var(--primary-subtle)', padding: '2px 6px', borderRadius: '4px' }}>
+                              {topic.category}
+                            </span>
+                            <MasteryBadge label={topic.masteryLabel || 'Proficient'} />
+                            <TrendBadge trend={topic.trend || 'neutral'} />
+                          </div>
+                          <h4 style={{ margin: '0 0 6px 0', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                            {topic.topic}
+                          </h4>
+                          {topic.strengths && topic.strengths.length > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                              <span style={{ fontSize: '0.72rem', color: '#22c55e', fontWeight: 600 }}>Strengths:</span>
+                              {topic.strengths.slice(0, 3).map((str, sIdx) => (
+                                <span key={sIdx} style={{ fontSize: '0.7rem', color: 'var(--text-muted)', backgroundColor: 'rgba(34, 197, 94, 0.08)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                                  {str}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#22c55e' }}>
+                              {topic.emaScore}%
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              {topic.attempts} attempts
+                            </div>
+                          </div>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate(`/interview/setup?category=${encodeURIComponent(topic.category)}&topic=${encodeURIComponent(topic.topic)}`)}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                          >
+                            <span>Reinforce Hard</span>
+                            <ArrowRight size={13} />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      No strong skills recorded yet. Complete more practice questions!
+                    </div>
+                  )}
+                </div>
               )}
             </section>
 
-            {/* Recent Evaluated Responses Feed */}
-            {overview?.recentActivity?.length > 0 && (
+            {/* Score History Timeline */}
+            {overview?.scoreHistory && overview.scoreHistory.length > 0 && (
               <section style={{
                 backgroundColor: 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
-                borderRadius: '12px',
-                padding: '22px',
+                borderRadius: '14px',
+                padding: '24px',
                 boxShadow: 'var(--shadow-card)'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                  <Clock size={16} style={{ color: 'var(--text-muted)' }} />
-                  <h3 style={{ fontSize: '0.98rem', fontWeight: 600, margin: 0, color: 'var(--text-primary)' }}>
-                    Recent Evaluated Answers
-                  </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                  <Clock size={18} color="var(--primary-text)" />
+                  <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                    Performance Trend Over Time (Last Sessions)
+                  </h2>
                 </div>
 
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  {overview.recentActivity.map((act, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-card-subtle)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: '6px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        flexWrap: 'wrap',
-                        gap: '8px'
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: '240px' }}>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '2px' }}>
-                          {act.questionText}
+                <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px' }}>
+                  {overview.scoreHistory.map((item, idx) => {
+                    const score = item.score || 0;
+                    const color = score >= 75 ? '#22c55e' : score >= 50 ? '#eab308' : '#ef4444';
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          minWidth: '130px',
+                          backgroundColor: 'var(--bg-card-subtle)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          textAlign: 'center'
+                        }}
+                      >
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          Session #{idx + 1}
                         </div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                          {act.category} • {act.topic} • {act.difficulty}
+                        <div style={{ fontSize: '1.3rem', fontWeight: 800, color, margin: '2px 0' }}>
+                          {score}%
+                        </div>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {item.category}
+                        </div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                          {item.date ? new Date(item.date).toLocaleDateString() : ''}
                         </div>
                       </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{
-                          fontSize: '0.7rem',
-                          fontWeight: 700,
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          backgroundColor: act.verdict === 'correct' ? 'var(--success-subtle)' : act.verdict === 'partially_correct' ? 'var(--warning-subtle)' : 'var(--error-subtle)',
-                          color: act.verdict === 'correct' ? 'var(--success-text)' : act.verdict === 'partially_correct' ? 'var(--warning-text)' : 'var(--error-text)'
-                        }}>
-                          {act.verdict === 'correct' ? 'Correct' : act.verdict === 'partially_correct' ? 'Partial' : 'Incorrect'} ({act.rawScore}/10)
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             )}

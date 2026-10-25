@@ -1,362 +1,446 @@
 /**
  * InterviewAce AI - Skill Gap Analyzer Service
  * 
- * Aggregates candidate interview evaluations deterministically:
- * - Calculates difficulty-weighted and recency-adjusted skill proficiency (0-100 scale).
- * - Distinguishes confirmed evidence (>= 3 questions) from preliminary (1-2) and insufficient (0).
- * - Classifies topics into 'strong' (>= 75), 'developing' (60-74), and 'needs_improvement' (< 60).
- * - Extracts concrete missing concepts from actual evaluations for targeted recommendations.
- * - Enforces strict user ownership; never accesses another user's interview data.
+ * Phase 3: Deterministic Skill Profiling, Exponential Moving Average (EMA),
+ * Role Requirements Matching, and Target Role Readiness Analytics.
  */
 
 import Interview from '../models/Interview.js';
-import { PROGRAMMING_LANGUAGES } from '../config/interviewCatalog.js';
+import SkillProfile from '../models/SkillProfile.js';
+import User from '../models/User.js';
+import { getRequirementsForRole } from '../data/roleRequirements.js';
+import { callGemini } from './ai.service.js';
 
-// Configurable thresholds for skill classification
-export const SKILL_THRESHOLDS = {
-  STRONG: 75,
-  DEVELOPING: 60,
-  CONFIRMED_EVIDENCE_MIN: 3,
-  PRELIMINARY_EVIDENCE_MIN: 1
+// Mastery classification thresholds (deterministic)
+export const MASTERY_THRESHOLDS = {
+  STRONG: 85,
+  PROFICIENT: 70,
+  DEVELOPING: 50
 };
 
-// Difficulty multipliers for normalized score calculation
-const DIFFICULTY_MULTIPLIERS = {
-  Easy: 0.95,
-  Medium: 1.0,
-  Hard: 1.10
+export const getMasteryLabel = (score) => {
+  if (score === null || score === undefined || score < 50) return 'Beginner';
+  if (score < 70) return 'Developing';
+  if (score < 85) return 'Proficient';
+  return 'Strong';
+};
+
+// EMA smoothing factor: 0.3 gives high responsiveness while smoothing noise
+const EMA_ALPHA = 0.3;
+
+/**
+ * Compute Exponential Moving Average for a series of chronological scores
+ */
+export const calculateEMA = (scores) => {
+  if (!Array.isArray(scores) || scores.length === 0) return 0;
+  let ema = scores[0];
+  for (let i = 1; i < scores.length; i++) {
+    ema = (EMA_ALPHA * scores[i]) + ((1 - EMA_ALPHA) * ema);
+  }
+  return Math.round(ema * 10) / 10;
 };
 
 /**
- * Calculate recency weight based on question submission date
- * Questions in last 14 days get 1.15x weight; last 30 days get 1.05x; older get 1.0x.
+ * Compute last-5 trend: compare recent 2 attempts vs prior attempts
  */
-const getRecencyWeight = (date) => {
-  if (!date) return 1.0;
-  const daysAgo = (Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24);
-  if (daysAgo <= 14) return 1.15;
-  if (daysAgo <= 30) return 1.05;
-  return 1.0;
-};
+export const calculateLast5Trend = (scores) => {
+  if (!Array.isArray(scores) || scores.length < 2) return 'neutral';
+  const recentSlice = scores.slice(-5);
+  if (recentSlice.length < 2) return 'neutral';
 
-/**
- * Determine trend between earlier and later attempts
- */
-const calculateTrend = (items) => {
-  if (!items || items.length < 2) return 'neutral';
-  
-  // Sort chronologically
-  const sorted = [...items].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const midpoint = Math.floor(sorted.length / 2);
-  const earlierSlice = sorted.slice(0, midpoint);
-  const laterSlice = sorted.slice(midpoint);
+  if (recentSlice.length === 2) {
+    const diff = recentSlice[1] - recentSlice[0];
+    if (diff >= 5) return 'improving';
+    if (diff <= -5) return 'declining';
+    return 'steady';
+  }
 
-  if (earlierSlice.length === 0 || laterSlice.length === 0) return 'neutral';
+  const latestTwo = recentSlice.slice(-2);
+  const prior = recentSlice.slice(0, -2);
 
-  const earlierAvg = earlierSlice.reduce((sum, item) => sum + item.score, 0) / earlierSlice.length;
-  const laterAvg = laterSlice.reduce((sum, item) => sum + item.score, 0) / laterSlice.length;
+  const avgLatest = latestTwo.reduce((a, b) => a + b, 0) / latestTwo.length;
+  const avgPrior = prior.reduce((a, b) => a + b, 0) / prior.length;
 
-  const diff = laterAvg - earlierAvg;
-  if (diff >= 5) return 'improving';
-  if (diff <= -5) return 'declining';
+  const diff = avgLatest - avgPrior;
+  if (diff >= 4) return 'improving';
+  if (diff <= -4) return 'declining';
   return 'steady';
 };
 
 /**
- * Extract clean, deduplicated missing concepts and strengths
+ * Deterministically compute Role Readiness Percentage
  */
-const extractUniqueItems = (arrays) => {
-  const set = new Set();
-  for (const arr of arrays) {
-    if (Array.isArray(arr)) {
-      for (const item of arr) {
-        if (typeof item === 'string' && item.trim().length > 3) {
-          set.add(item.trim());
-        }
-      }
-    }
+export const calculateRoleReadiness = (targetRole, topicProfiles, categoryProfiles) => {
+  const roleConfig = getRequirementsForRole(targetRole);
+  if (!roleConfig || !Array.isArray(roleConfig.skills) || roleConfig.skills.length === 0) {
+    return { readinessPercentage: 0, requiredSkills: [] };
   }
-  return Array.from(set).slice(0, 5);
+
+  let totalWeight = 0;
+  let weightedScoreSum = 0;
+
+  const requiredSkills = roleConfig.skills.map(req => {
+    totalWeight += req.weight;
+
+    // First try finding matching topic in same category
+    const topicMatch = topicProfiles.find(t => 
+      t.category.toLowerCase() === req.category.toLowerCase() &&
+      (t.topic.toLowerCase().includes(req.topic.toLowerCase()) || req.topic.toLowerCase().includes(t.topic.toLowerCase()))
+    );
+
+    // Second try finding any topic in category
+    const catMatch = categoryProfiles.find(c => c.category.toLowerCase() === req.category.toLowerCase());
+
+    const candidateScore = topicMatch 
+      ? topicMatch.emaScore 
+      : (catMatch ? catMatch.emaScore : 0);
+
+    const attempts = topicMatch ? topicMatch.attempts : (catMatch ? catMatch.attempts : 0);
+    const masteryLabel = getMasteryLabel(candidateScore);
+
+    weightedScoreSum += (req.weight * candidateScore);
+
+    return {
+      category: req.category,
+      topic: req.topic,
+      importanceWeight: req.weight,
+      candidateScore: Math.round(candidateScore),
+      attempts,
+      masteryLabel,
+      isCovered: attempts > 0
+    };
+  });
+
+  const readinessPercentage = totalWeight > 0 
+    ? Math.min(100, Math.max(0, Math.round(weightedScoreSum / totalWeight))) 
+    : 0;
+
+  return {
+    targetRole: roleConfig.name || targetRole,
+    readinessPercentage,
+    requiredSkills
+  };
 };
 
 /**
- * Aggregate all evaluated interview data for a user
+ * Optional Gemini narrative summary with timeout and strict fallback
  */
-export const getUserSkillAnalytics = async (userId, filterCategory = '') => {
-  if (!userId) {
-    throw new Error('User ID is required for skill analytics.');
+export const generateSkillNarrativeSummary = async ({
+  targetRole,
+  readinessPercentage,
+  completedSessionsCount,
+  topStrengths,
+  topGaps
+}) => {
+  // Deterministic template fallback
+  const strName = topStrengths[0]?.topic || topStrengths[0]?.category || 'technical fundamentals';
+  const gapName = topGaps[0]?.topic || topGaps[0]?.category || 'advanced system concepts';
+
+  if (completedSessionsCount === 0) {
+    return `Complete your first mock interview to generate an evidence-backed skill gap analysis for ${targetRole}.`;
+  }
+  if (completedSessionsCount === 1) {
+    return `Preliminary data shows baseline knowledge in ${strName}. Complete 1 more interview session to solidify your ${targetRole} readiness profile.`;
   }
 
-  // Fetch only interviews belonging to this authenticated user
-  const query = {
+  const defaultTemplate = `You show established competency in ${strName}, reaching ${readinessPercentage}% readiness for ${targetRole}. Focus your next practice session on ${gapName} to accelerate your promotion readiness.`;
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey.startsWith('mock_')) {
+    return defaultTemplate;
+  }
+
+  try {
+    const prompt = `Write a 2-sentence executive summary for an engineer targeting the "${targetRole}" position.
+Their deterministic readiness score is ${readinessPercentage}%.
+Top technical strengths: ${topStrengths.map(s => s.topic || s.category).join(', ') || 'Core concepts'}.
+Top technical gaps to improve: ${topGaps.map(g => g.topic || g.category).join(', ') || 'System trade-offs'}.
+Tone: Professional, encouraging, and focused directly on their highest-ROI action. Do NOT use markdown asterisks. Maximum 40 words. Respond in JSON format: {"summary": "your text here"}`;
+
+    const rawResponse = await callGemini(prompt, 'You are an executive engineering mentor.', 5000);
+    if (rawResponse) {
+      try {
+        const parsed = JSON.parse(rawResponse.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim());
+        if (parsed.summary && parsed.summary.trim().length > 15) {
+          return parsed.summary.trim();
+        }
+      } catch (parseErr) {
+        if (typeof rawResponse === 'string' && rawResponse.trim().length > 15) {
+          return rawResponse.trim().replace(/^["']|["']$/g, '');
+        }
+      }
+    }
+    return defaultTemplate;
+  } catch (err) {
+    return defaultTemplate;
+  }
+};
+
+/**
+ * Update and persist a candidate's complete Skill Profile
+ * Run after session completion or explicitly requested
+ */
+export const updateUserSkillProfile = async (userId, customRole = '') => {
+  if (!userId) throw new Error('User ID is required to update skill profile.');
+
+  const user = await User.findById(userId).select('preferences targetRole').lean();
+  const targetRole = customRole || user?.preferences?.targetRole || user?.targetRole || 'Software Engineer';
+
+  // Gather all past completed or answered interview sessions for this user
+  const interviews = await Interview.find({
     userId,
     status: { $in: ['completed', 'in_progress'] }
-  };
-
-  if (filterCategory && filterCategory.trim()) {
-    query.category = new RegExp(`^${filterCategory.trim()}$`, 'i');
-  }
-
-  const interviews = await Interview.find(query)
-    .select('category difficulty targetRole topic createdAt completedAt questions')
+  })
+    .sort({ createdAt: 1 }) // Chronological order for accurate EMA
+    .select('category difficulty targetRole topic createdAt completedAt status finalScore questions')
     .lean();
 
-  const topicGroups = new Map();
-  let totalEvaluatedCount = 0;
-  const recentActivities = [];
+  const completedSessions = interviews.filter(i => i.status === 'completed');
+  const completedSessionsCount = completedSessions.length;
 
-  for (const interview of interviews) {
-    const interviewCategory = interview.category || 'General';
-    const interviewDate = interview.completedAt || interview.createdAt || new Date();
+  // Track raw scores chronologically per topic and per category
+  const topicDataMap = new Map();
+  const categoryDataMap = new Map();
+  const scoreHistory = [];
 
-    if (!Array.isArray(interview.questions)) continue;
+  for (const session of interviews) {
+    const sessionCategory = session.category || 'General';
+    const sessionDate = session.completedAt || session.createdAt || new Date();
 
-    for (const q of interview.questions) {
-      // Must be answered and have a valid evaluation score
-      // Skip unevaluated, skipped, or failed evaluations
+    if (session.finalScore !== undefined && session.status === 'completed') {
+      scoreHistory.push({
+        interviewId: session._id,
+        category: sessionCategory,
+        score: session.finalScore,
+        date: sessionDate
+      });
+    }
+
+    if (!Array.isArray(session.questions)) continue;
+
+    for (const q of session.questions) {
       const hasEvaluation = q.evaluation && typeof q.evaluation.score === 'number' && q.evaluation.score >= 0;
-      const isCandidateAnswered = q.isAnswered || (q.userAnswer && q.userAnswer.trim() && q.userAnswer.trim() !== '[Skipped]');
+      const isAnswered = q.isAnswered || (q.userAnswer && q.userAnswer.trim() && q.userAnswer.trim() !== '[Skipped]');
 
-      if (!hasEvaluation || !isCandidateAnswered) {
-        continue;
-      }
+      if (!hasEvaluation || !isAnswered) continue;
 
-      totalEvaluatedCount++;
+      const category = q.category || sessionCategory;
+      const topic = (q.topic || session.topic || 'General Concepts').trim();
+      const topicKey = `${category.toLowerCase()}:::${topic.toLowerCase()}`;
+      const qScore100 = q.evaluation.score100 !== undefined 
+        ? q.evaluation.score100 
+        : Math.min(100, Math.max(0, Math.round(q.evaluation.score * 10)));
+      const qDate = q.submittedAt || sessionDate;
 
-      const category = q.category || interviewCategory;
-      const topicName = (q.topic || interview.topic || 'General Concepts').trim();
-      const topicKey = `${category.toLowerCase()}:::${topicName.toLowerCase()}`;
-      const qDate = q.submittedAt || interviewDate;
-
-      // Difficulty-normalized score
-      const rawPct = q.evaluation.score100 !== undefined ? q.evaluation.score100 : ((q.evaluation.score / 10) * 100);
-      const diffMultiplier = DIFFICULTY_MULTIPLIERS[q.difficulty] || 1.0;
-      const normalizedScore = Math.min(100, Math.max(0, Math.round(rawPct * diffMultiplier)));
-      const recencyWeight = getRecencyWeight(qDate);
-
-      const questionRecord = {
-        questionId: q.questionId || (q._id ? q._id.toString() : ''),
-        questionText: q.questionText,
-        score: normalizedScore,
-        rawScore: q.evaluation.score,
-        score100: q.evaluation.score100 !== undefined ? q.evaluation.score100 : Math.round(q.evaluation.score * 10),
-        difficulty: q.difficulty || 'Medium',
-        verdict: q.evaluation.verdict || (q.evaluation.score >= 8 ? 'correct' : q.evaluation.score >= 5 ? 'partially_correct' : 'incorrect'),
-        date: qDate,
-        weight: recencyWeight,
-        missingConcepts: [
-          ...(Array.isArray(q.evaluation.missingConcepts) ? q.evaluation.missingConcepts : []),
-          ...(Array.isArray(q.evaluation.incorrectStatements) ? q.evaluation.incorrectStatements : [])
-        ],
-        strengths: q.evaluation.strengths || [],
-        suggestions: q.evaluation.suggestions || [],
-        dimensions: q.evaluation.dimensions || null
-      };
-
-      if (!topicGroups.has(topicKey)) {
-        topicGroups.set(topicKey, {
+      // Update topic data
+      if (!topicDataMap.has(topicKey)) {
+        topicDataMap.set(topicKey, {
+          topic,
           category,
-          topic: topicName,
-          items: []
+          scores: [],
+          missingConcepts: [],
+          strengths: [],
+          lastAttemptDate: qDate
         });
       }
-      topicGroups.get(topicKey).items.push(questionRecord);
+      const tRecord = topicDataMap.get(topicKey);
+      tRecord.scores.push(qScore100);
+      tRecord.lastAttemptDate = qDate;
+      if (Array.isArray(q.evaluation.missingConcepts)) {
+        tRecord.missingConcepts.push(...q.evaluation.missingConcepts);
+      }
+      if (Array.isArray(q.evaluation.strengths)) {
+        tRecord.strengths.push(...q.evaluation.strengths);
+      }
 
-      recentActivities.push({
-        ...questionRecord,
-        category,
-        topic: topicName
-      });
+      // Update category data
+      const catKey = category.toLowerCase();
+      if (!categoryDataMap.has(catKey)) {
+        categoryDataMap.set(catKey, {
+          category,
+          scores: []
+        });
+      }
+      categoryDataMap.get(catKey).scores.push(qScore100);
     }
   }
 
-  // Sort recent activities by date descending
-  recentActivities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  // Calculate deterministic metrics per topic
+  const topicProfiles = [];
+  for (const [, t] of topicDataMap.entries()) {
+    const attempts = t.scores.length;
+    const avgScore = Math.round(t.scores.reduce((a, b) => a + b, 0) / attempts);
+    const emaScore = calculateEMA(t.scores);
+    const trend = calculateLast5Trend(t.scores);
+    const masteryLabel = getMasteryLabel(emaScore);
 
-  // Aggregate metrics per topic
-  const analyzedTopics = [];
+    const uniqueMissing = Array.from(new Set(t.missingConcepts)).filter(Boolean).slice(0, 5);
+    const uniqueStrengths = Array.from(new Set(t.strengths)).filter(Boolean).slice(0, 5);
 
-  for (const [, group] of topicGroups.entries()) {
-    const { category, topic, items } = group;
-    const evidenceCount = items.length;
-
-    // Weighted average score
-    const totalWeightedScore = items.reduce((sum, item) => sum + (item.score * item.weight), 0);
-    const totalWeight = items.reduce((sum, item) => sum + item.weight, 0);
-    const estimatedScore = totalWeight > 0 ? Math.round(totalWeightedScore / totalWeight) : 0;
-
-    // Confidence
-    let confidence = 'insufficient';
-    if (evidenceCount >= SKILL_THRESHOLDS.CONFIRMED_EVIDENCE_MIN) {
-      confidence = 'confirmed';
-    } else if (evidenceCount >= SKILL_THRESHOLDS.PRELIMINARY_EVIDENCE_MIN) {
-      confidence = 'preliminary';
-    }
-
-    // Classification
-    let classification = 'insufficient_evidence';
-    if (confidence !== 'insufficient') {
-      if (estimatedScore >= SKILL_THRESHOLDS.STRONG) {
-        classification = 'strong';
-      } else if (estimatedScore >= SKILL_THRESHOLDS.DEVELOPING) {
-        classification = 'developing';
-      } else {
-        classification = 'needs_improvement';
-      }
-    }
-
-    const trend = calculateTrend(items);
-    const missingConcepts = extractUniqueItems(items.map(i => i.missingConcepts));
-    const strengths = extractUniqueItems(items.map(i => i.strengths));
-
-    // Grounded recommendation text
-    let recommendedAction = '';
-    if (classification === 'needs_improvement') {
-      if (missingConcepts.length > 0) {
-        recommendedAction = `Review ${missingConcepts.slice(0, 2).join(' & ')}: reinforce foundational mechanics through dedicated practice.`;
-      } else {
-        recommendedAction = `Strengthen foundational principles of ${topic} through structured practice questions.`;
-      }
-    } else if (classification === 'developing') {
-      if (missingConcepts.length > 0) {
-        recommendedAction = `Target ${missingConcepts.slice(0, 2).join(' & ')} to elevate performance from developing to strong.`;
-      } else {
-        recommendedAction = `Explore edge cases, internal trade-offs, and multi-threaded/scaling implications in ${topic}.`;
-      }
-    } else if (classification === 'strong') {
-      recommendedAction = `Proficiency established (${estimatedScore}/100). Maintain sharpness with hard-level questions and system trade-offs.`;
-    } else {
-      recommendedAction = `Attempt at least 3 practice questions to establish a reliable ${topic} proficiency baseline.`;
-    }
-
-    analyzedTopics.push({
-      skillName: topic,
-      topic,
-      category,
-      estimatedScore: confidence === 'insufficient' ? null : estimatedScore,
-      evidenceCount,
-      confidence,
-      classification,
+    topicProfiles.push({
+      topic: t.topic,
+      category: t.category,
+      attempts,
+      averageScore: avgScore,
+      emaScore,
+      lastScores: t.scores.slice(-5),
       trend,
-      missingConcepts,
-      strengths,
-      recommendedAction,
-      practiceUrl: `/interview/setup?category=${encodeURIComponent(category)}&topic=${encodeURIComponent(topic)}`,
-      lastAttemptDate: items[items.length - 1]?.date || null,
-      history: items
+      masteryLabel,
+      missingConcepts: uniqueMissing,
+      strengths: uniqueStrengths,
+      lastAttemptDate: t.lastAttemptDate
     });
   }
 
-  // Sort topics by score ascending within gaps, descending within strong
-  const strong = analyzedTopics.filter(t => t.classification === 'strong')
-    .sort((a, b) => b.estimatedScore - a.estimatedScore);
+  // Calculate deterministic metrics per category
+  const categoryProfiles = [];
+  for (const [, c] of categoryDataMap.entries()) {
+    const attempts = c.scores.length;
+    const avgScore = Math.round(c.scores.reduce((a, b) => a + b, 0) / attempts);
+    const emaScore = calculateEMA(c.scores);
+    const trend = calculateLast5Trend(c.scores);
+    const masteryLabel = getMasteryLabel(emaScore);
 
-  const developing = analyzedTopics.filter(t => t.classification === 'developing')
-    .sort((a, b) => b.estimatedScore - a.estimatedScore);
-
-  const needsImprovement = analyzedTopics.filter(t => t.classification === 'needs_improvement')
-    .sort((a, b) => a.estimatedScore - b.estimatedScore);
-
-  const insufficient = analyzedTopics.filter(t => t.classification === 'insufficient_evidence');
-
-  // Overall Technical Proficiency: computed only from eligible evaluated skills
-  const evaluatedTopics = analyzedTopics.filter(t => t.estimatedScore !== null);
-  const overallScore = evaluatedTopics.length > 0
-    ? Math.round(evaluatedTopics.reduce((sum, t) => sum + t.estimatedScore, 0) / evaluatedTopics.length)
-    : null;
-
-  // Category-level breakdown
-  const categoryMap = new Map();
-  for (const topic of analyzedTopics) {
-    if (!categoryMap.has(topic.category)) {
-      categoryMap.set(topic.category, {
-        category: topic.category,
-        topicsCount: 0,
-        evaluatedTopicsCount: 0,
-        scoreSum: 0,
-        questionsCount: 0,
-        strongCount: 0,
-        needsImprovementCount: 0
-      });
-    }
-    const cat = categoryMap.get(topic.category);
-    cat.topicsCount++;
-    cat.questionsCount += topic.evidenceCount;
-    if (topic.estimatedScore !== null) {
-      cat.evaluatedTopicsCount++;
-      cat.scoreSum += topic.estimatedScore;
-    }
-    if (topic.classification === 'strong') cat.strongCount++;
-    if (topic.classification === 'needs_improvement') cat.needsImprovementCount++;
+    categoryProfiles.push({
+      category: c.category,
+      attempts,
+      averageScore: avgScore,
+      emaScore,
+      trend,
+      masteryLabel
+    });
   }
 
-  const categoryBreakdown = Array.from(categoryMap.values()).map(cat => ({
-    category: cat.category,
-    averageScore: cat.evaluatedTopicsCount > 0 ? Math.round(cat.scoreSum / cat.evaluatedTopicsCount) : null,
-    evaluatedTopicsCount: cat.evaluatedTopicsCount,
-    questionsCount: cat.questionsCount,
-    strongCount: cat.strongCount,
-    needsImprovementCount: cat.needsImprovementCount
-  }));
+  // Rank weakest and strongest topics
+  const weakestTopics = [...topicProfiles].sort((a, b) => a.emaScore - b.emaScore);
+  const strongestTopics = [...topicProfiles].sort((a, b) => b.emaScore - a.emaScore);
 
-  // Top recommendations: prioritzing weak topics first, then developing topics
-  const topRecommendations = [
-    ...needsImprovement.map(t => ({
-      skillName: t.skillName,
-      category: t.category,
-      estimatedScore: t.estimatedScore,
-      evidenceCount: t.evidenceCount,
-      priority: 'high',
-      missingConcepts: t.missingConcepts,
-      recommendedAction: t.recommendedAction,
-      practiceUrl: t.practiceUrl
-    })),
-    ...developing.map(t => ({
-      skillName: t.skillName,
-      category: t.category,
-      estimatedScore: t.estimatedScore,
-      evidenceCount: t.evidenceCount,
-      priority: 'medium',
-      missingConcepts: t.missingConcepts,
-      recommendedAction: t.recommendedAction,
-      practiceUrl: t.practiceUrl
-    }))
-  ].slice(0, 5);
+  // Compute Role Readiness %
+  const { readinessPercentage, requiredSkills } = calculateRoleReadiness(
+    targetRole, 
+    topicProfiles, 
+    categoryProfiles
+  );
+
+  const overallScore = topicProfiles.length > 0
+    ? Math.round(topicProfiles.reduce((acc, t) => acc + t.emaScore, 0) / topicProfiles.length)
+    : 0;
+
+  // Generate short narrative summary
+  const narrativeSummary = await generateSkillNarrativeSummary({
+    targetRole,
+    readinessPercentage,
+    completedSessionsCount,
+    topStrengths: strongestTopics.slice(0, 3),
+    topGaps: weakestTopics.slice(0, 3)
+  });
+
+  // Save or update SkillProfile in database
+  const profileDoc = await SkillProfile.findOneAndUpdate(
+    { userId },
+    {
+      userId,
+      targetRole,
+      overallScore,
+      readinessPercentage,
+      completedSessionsCount,
+      narrativeSummary,
+      categories: categoryProfiles,
+      topics: topicProfiles,
+      scoreHistory: scoreHistory.slice(-20),
+      lastCalculatedAt: new Date()
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   return {
+    profile: profileDoc,
+    targetRole,
     overallScore,
-    totalEvaluatedQuestions: totalEvaluatedCount,
-    evaluatedTopicsCount: evaluatedTopics.length,
+    readinessPercentage,
+    completedSessionsCount,
+    narrativeSummary,
+    categories: categoryProfiles,
+    topics: topicProfiles,
+    weakestTopics: weakestTopics.slice(0, 6),
+    strongestTopics: strongestTopics.slice(0, 6),
+    requiredSkills,
+    scoreHistory: scoreHistory.slice(-10)
+  };
+};
+
+/**
+ * Backward compatible accessor for existing controllers
+ */
+export const getUserSkillAnalytics = async (userId, filterCategory = '') => {
+  const data = await updateUserSkillProfile(userId);
+
+  let filteredTopics = data.topics;
+  if (filterCategory && filterCategory.trim()) {
+    filteredTopics = data.topics.filter(t => t.category.toLowerCase() === filterCategory.toLowerCase().trim());
+  }
+
+  const strong = filteredTopics.filter(t => t.masteryLabel === 'Strong' || t.masteryLabel === 'Proficient');
+  const developing = filteredTopics.filter(t => t.masteryLabel === 'Developing');
+  const needsImprovement = filteredTopics.filter(t => t.masteryLabel === 'Beginner');
+
+  const topRecommendations = needsImprovement.concat(developing).slice(0, 5).map(t => ({
+    skillName: t.topic,
+    category: t.category,
+    estimatedScore: t.emaScore,
+    evidenceCount: t.attempts,
+    priority: t.masteryLabel === 'Beginner' ? 'high' : 'medium',
+    missingConcepts: t.missingConcepts,
+    recommendedAction: `Focus on ${t.missingConcepts[0] || t.topic} to advance from ${t.masteryLabel} to next tier.`,
+    practiceUrl: `/interview/setup?category=${encodeURIComponent(t.category)}&topic=${encodeURIComponent(t.topic)}`
+  }));
+
+  return {
+    overallScore: data.overallScore,
+    readinessPercentage: data.readinessPercentage,
+    targetRole: data.targetRole,
+    completedSessionsCount: data.completedSessionsCount,
+    narrativeSummary: data.narrativeSummary,
+    totalEvaluatedQuestions: data.topics.reduce((acc, t) => acc + t.attempts, 0),
+    evaluatedTopicsCount: filteredTopics.length,
     counts: {
       strong: strong.length,
       developing: developing.length,
       needsImprovement: needsImprovement.length,
-      insufficientEvidence: insufficient.length
+      insufficientEvidence: data.completedSessionsCount < 2 ? 1 : 0
     },
     strong,
     developing,
     needsImprovement,
-    insufficientEvidence: insufficient,
-    allTopics: analyzedTopics,
-    categoryBreakdown,
+    insufficientEvidence: [],
+    allTopics: filteredTopics.map(t => ({
+      skillName: t.topic,
+      topic: t.topic,
+      category: t.category,
+      estimatedScore: t.emaScore,
+      evidenceCount: t.attempts,
+      classification: t.masteryLabel === 'Strong' ? 'strong' : (t.masteryLabel === 'Proficient' ? 'strong' : (t.masteryLabel === 'Developing' ? 'developing' : 'needs_improvement')),
+      masteryLabel: t.masteryLabel,
+      trend: t.trend,
+      missingConcepts: t.missingConcepts,
+      strengths: t.strengths,
+      recommendedAction: `Practice ${t.topic} to solidify core technical accuracy.`,
+      practiceUrl: `/interview/setup?category=${encodeURIComponent(t.category)}&topic=${encodeURIComponent(t.topic)}`
+    })),
+    weakestTopics: data.weakestTopics,
+    strongestTopics: data.strongestTopics,
+    categoryBreakdown: data.categories,
+    requiredSkills: data.requiredSkills,
+    scoreHistory: data.scoreHistory,
     topRecommendations,
-    recentActivity: recentActivities.slice(0, 5)
+    recentActivity: data.scoreHistory
   };
 };
 
-/**
- * Get deep-dive details for a specific skill topic
- */
 export const getSingleSkillAnalytics = async (userId, skillName) => {
-  if (!userId || !skillName) {
-    throw new Error('User ID and skill name are required.');
-  }
-
   const analytics = await getUserSkillAnalytics(userId);
-  const normalizedTarget = skillName.trim().toLowerCase();
-
   const found = analytics.allTopics.find(
-    t => t.skillName.toLowerCase() === normalizedTarget || t.topic.toLowerCase() === normalizedTarget
+    t => t.skillName.toLowerCase() === skillName.toLowerCase() || t.topic.toLowerCase() === skillName.toLowerCase()
   );
 
   if (!found) {
@@ -365,8 +449,8 @@ export const getSingleSkillAnalytics = async (userId, skillName) => {
       category: 'General',
       estimatedScore: null,
       evidenceCount: 0,
-      confidence: 'insufficient',
       classification: 'insufficient_evidence',
+      masteryLabel: 'Beginner',
       trend: 'neutral',
       missingConcepts: [],
       strengths: [],
@@ -376,8 +460,5 @@ export const getSingleSkillAnalytics = async (userId, skillName) => {
     };
   }
 
-  return {
-    ...found,
-    history: found.history || []
-  };
+  return found;
 };

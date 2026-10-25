@@ -1734,4 +1734,36 @@ export const revealCodeHint = async (req, res, next) => {
   }
 };
 
+/**
+ * Discard / delete an incomplete or unwanted interview session
+ * DELETE /api/interviews/:id
+ */
+export const discardInterview = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Invalid interview session ID.'
+      });
+    }
+
+    const interview = await Interview.findOneAndDelete({ _id: id, userId: req.user._id });
+    if (!interview) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Interview session not found or unauthorized.'
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Interview session discarded successfully.'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
 

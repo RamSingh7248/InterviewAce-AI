@@ -1,67 +1,42 @@
+import rateLimit from 'express-rate-limit';
+
 /**
- * In-memory sliding-window rate limiter for AI generation and sensitive API endpoints.
- * Protects against quota exhaustion, automated spam, and server overloading.
+ * Rate Limiter for Authentication Endpoints (Login & Signup)
+ * Slows down brute-force credential stuffing and denial of service.
  */
-
-const requestBuckets = new Map();
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // Limit each IP to 30 requests per windowMs
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable `X-RateLimit-*` headers
+  message: {
+    status: 'error',
+    message: 'Too many authentication attempts from this IP address. Please try again after 15 minutes.'
+  }
+});
 
 /**
- * Creates an Express rate limiting middleware.
- * 
- * @param {Object} options
- * @param {number} options.windowMs - Time window in milliseconds (default 60s)
- * @param {number} options.max - Max requests per window per identifier (default 10)
- * @param {string} options.message - Error message when rate limit exceeded
+ * Generic Rate Limiter factory helper
  */
 export const createRateLimiter = ({
   windowMs = 60 * 1000,
-  max = 10,
-  message = 'Too many requests. Please wait before generating more questions.'
+  max = 30,
+  message = 'Too many requests. Please wait a moment.'
 } = {}) => {
-  return (req, res, next) => {
-    // Identify by authenticated user ID if available, otherwise by IP
-    const key = req.user?._id ? `user_${req.user._id}` : `ip_${req.ip || req.connection.remoteAddress}`;
-    const now = Date.now();
-
-    let bucket = requestBuckets.get(key);
-    if (!bucket) {
-      bucket = [];
-      requestBuckets.set(key, bucket);
+  return rateLimit({
+    windowMs,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      status: 'error',
+      message
     }
-
-    // Filter out timestamps outside the active window
-    const windowStart = now - windowMs;
-    const recentRequests = bucket.filter(timestamp => timestamp > windowStart);
-
-    if (recentRequests.length >= max) {
-      const oldestRequest = recentRequests[0];
-      const retryAfterSeconds = Math.ceil((oldestRequest + windowMs - now) / 1000);
-
-      res.setHeader('Retry-After', retryAfterSeconds);
-      return res.status(429).json({
-        status: 'error',
-        message,
-        retryAfterSeconds
-      });
-    }
-
-    recentRequests.push(now);
-    requestBuckets.set(key, recentRequests);
-
-    // Periodically clean up stale keys to prevent memory leaks
-    if (requestBuckets.size > 5000) {
-      for (const [k, timestamps] of requestBuckets.entries()) {
-        const valid = timestamps.filter(t => t > windowStart);
-        if (valid.length === 0) {
-          requestBuckets.delete(k);
-        } else {
-          requestBuckets.set(k, valid);
-        }
-      }
-    }
-
-    next();
-  };
+  });
 };
 
-export default createRateLimiter;
+export default {
+  authLimiter,
+  createRateLimiter
+};
+

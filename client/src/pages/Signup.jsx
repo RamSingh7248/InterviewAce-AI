@@ -38,7 +38,11 @@ const Signup = () => {
 
   const validate = () => {
     const newErrors = {};
-    if (!fullName.trim()) newErrors.fullName = 'Full name is required';
+    if (!fullName.trim()) {
+      newErrors.fullName = 'Full name is required';
+    } else if (fullName.trim().length < 2) {
+      newErrors.fullName = 'Full name must be at least 2 characters';
+    }
     
     if (!email.trim()) {
       newErrors.email = 'Email address is required';
@@ -48,11 +52,15 @@ const Signup = () => {
 
     if (!password) {
       newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
+    } else if (password.length < 8) {
+      newErrors.password = 'Password must be at least 8 characters';
+    } else if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      newErrors.password = 'Password must contain at least one letter and one number';
     }
 
-    if (confirmPassword !== password) {
+    if (!confirmPassword) {
+      newErrors.confirmPassword = 'Confirm password is required';
+    } else if (confirmPassword !== password) {
       newErrors.confirmPassword = 'Passwords do not match';
     }
 
@@ -74,17 +82,15 @@ const Signup = () => {
       await signup({
         name: fullName.trim(),
         email: email.trim(),
-        password
+        password,
+        confirmPassword
       });
 
-      navigate('/login', {
-        state: {
-          registeredMessage: 'Account created successfully! Please sign in with your credentials.'
-        }
-      });
+      // Immediate session landing on dashboard as per specification
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       const msg = err.response?.data?.message || (err.message === 'Network Error' ? 'Unable to connect to backend server. Please verify backend is running.' : 'Registration failed. Please try again.');
-      if (msg.toLowerCase().includes('already exists') || msg.toLowerCase().includes('email')) {
+      if (err.response?.status === 400 && (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('email'))) {
         setErrors(prev => ({ ...prev, email: msg }));
       }
       setServerError(msg);

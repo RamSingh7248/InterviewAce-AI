@@ -799,13 +799,14 @@ const InterviewSetup = () => {
 
   const qCategory = searchParams.get('category');
   const qTopic = searchParams.get('topic');
+  const qMode = searchParams.get('mode');
 
   const [category, setCategory] = useState(qCategory || user?.preferences?.preferredCategories?.[0] || 'Java');
   const [difficulty, setDifficulty] = useState(user?.preferences?.preferredDifficulty || 'Medium');
   const [totalQuestions, setTotalQuestions] = useState(user?.preferences?.preferredQuestionCount || 5);
   const [targetRole, setTargetRole] = useState(user?.preferences?.targetRole || 'SDE-1');
   const [experienceLevel, setExperienceLevel] = useState('fresher');
-  const [interviewMode, setInterviewMode] = useState('mixed');
+  const [interviewMode, setInterviewMode] = useState(qMode || 'mixed');
   const [companyStyle, setCompanyStyle] = useState('General Tech');
   const [interviewLanguage, setInterviewLanguage] = useState('en-US');
   

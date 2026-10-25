@@ -22,8 +22,26 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, 'Password is required'],
-      minlength: [6, 'Password must be at least 6 characters'],
+      minlength: [8, 'Password must be at least 8 characters long'],
       select: false // Never return password hash in regular queries
+    },
+    refreshToken: {
+      type: String,
+      default: '',
+      select: false
+    },
+    passwordResetToken: {
+      type: String,
+      default: '',
+      select: false
+    },
+    passwordResetExpires: {
+      type: Date,
+      select: false
+    },
+    onboardingCompleted: {
+      type: Boolean,
+      default: false
     },
     phoneNumber: {
       type: String,
@@ -98,6 +116,9 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 userSchema.methods.toJSON = function () {
   const user = this.toObject();
   delete user.password;
+  delete user.refreshToken;
+  delete user.passwordResetToken;
+  delete user.passwordResetExpires;
   delete user.__v;
   return user;
 };

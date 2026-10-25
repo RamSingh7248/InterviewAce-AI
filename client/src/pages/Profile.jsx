@@ -22,7 +22,11 @@ import {
   AlertCircle, 
   Loader2, 
   X, 
-  Save 
+  Save,
+  Lock,
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import '../styles/auth.css';
 
@@ -77,6 +81,18 @@ const Profile = () => {
     preferredQuestionCount: 5,
     resumeSkillsText: ''
   });
+
+  // Change Password state
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
+  const [pwLoading, setPwLoading] = useState(false);
 
   // Populate form with current user values
   const syncFormDataWithUser = (u) => {
@@ -187,6 +203,48 @@ const Profile = () => {
       setError(err.response?.data?.message || 'Could not save profile changes. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    setPwError('');
+    setPwSuccess('');
+
+    if (!passwordData.currentPassword) {
+      setPwError('Current password is required');
+      return;
+    }
+    if (!passwordData.newPassword) {
+      setPwError('New password is required');
+      return;
+    }
+    if (passwordData.newPassword.length < 8) {
+      setPwError('New password must be at least 8 characters');
+      return;
+    }
+    if (!/[A-Za-z]/.test(passwordData.newPassword) || !/\d/.test(passwordData.newPassword)) {
+      setPwError('New password must contain at least one letter and one number');
+      return;
+    }
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      setPwError('New passwords do not match');
+      return;
+    }
+
+    setPwLoading(true);
+    try {
+      await api.post('/auth/change-password', {
+        currentPassword: passwordData.currentPassword,
+        newPassword: passwordData.newPassword,
+        confirmPassword: passwordData.confirmPassword
+      });
+      setPwSuccess('Your password has been changed successfully.');
+      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      setPwError(err.response?.data?.message || 'Failed to change password. Please check your current password.');
+    } finally {
+      setPwLoading(false);
     }
   };
 
@@ -528,6 +586,183 @@ const Profile = () => {
                   <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Salted bcrypt (Never exposed)</span>
                 </div>
               </div>
+            </div>
+
+            {/* Section: Change Password & Security */}
+            <div style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '14px', padding: '24px', boxShadow: 'var(--shadow-card)', transition: 'background-color var(--transition-fast), border-color var(--transition-fast)' }}>
+              <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: '0 0 6px 0', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <KeyRound size={18} color="var(--primary)" /> Change Password
+              </h2>
+              <p style={{ margin: '0 0 16px 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Keep your account secure by using a strong password. Current password verification is required.
+              </p>
+
+              {pwError && (
+                <div className="auth-alert-error" style={{ marginBottom: '16px' }}>
+                  <AlertCircle size={16} />
+                  <span>{pwError}</span>
+                </div>
+              )}
+
+              {pwSuccess && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  backgroundColor: 'var(--success-subtle)',
+                  border: '1px solid var(--success)',
+                  borderRadius: '8px',
+                  padding: '12px 14px',
+                  color: 'var(--success-text)',
+                  fontSize: '0.88rem',
+                  marginBottom: '16px'
+                }}>
+                  <CheckCircle2 size={16} />
+                  <span>{pwSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handlePasswordChange} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
+                {/* Current Password */}
+                <div>
+                  <label htmlFor="currentPasswordInput" style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 500 }}>
+                    Current Password <span style={{ color: 'var(--error-text)' }}>*</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      id="currentPasswordInput"
+                      type={showCurrentPw ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      placeholder="Enter current password"
+                      value={passwordData.currentPassword}
+                      onChange={e => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+                      style={{
+                        width: '100%',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        padding: '10px 40px 10px 12px',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.88rem',
+                        boxSizing: 'border-box',
+                        outline: 'none'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPw(!showCurrentPw)}
+                      aria-label="Toggle password visibility"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        padding: '4px'
+                      }}
+                    >
+                      {showCurrentPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* New Password */}
+                <div>
+                  <label htmlFor="newPasswordInput" style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 500 }}>
+                    New Password <span style={{ color: 'var(--error-text)' }}>*</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      id="newPasswordInput"
+                      type={showNewPw ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      placeholder="Min 8 chars, 1 letter & 1 digit"
+                      value={passwordData.newPassword}
+                      onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                      style={{
+                        width: '100%',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        padding: '10px 40px 10px 12px',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.88rem',
+                        boxSizing: 'border-box',
+                        outline: 'none'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPw(!showNewPw)}
+                      aria-label="Toggle password visibility"
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        padding: '4px'
+                      }}
+                    >
+                      {showNewPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Confirm New Password */}
+                <div>
+                  <label htmlFor="confirmPasswordInput" style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 500 }}>
+                    Confirm New Password <span style={{ color: 'var(--error-text)' }}>*</span>
+                  </label>
+                  <input
+                    id="confirmPasswordInput"
+                    type={showNewPw ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    placeholder="Re-enter new password"
+                    value={passwordData.confirmPassword}
+                    onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '8px',
+                      padding: '10px 12px',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.88rem',
+                      boxSizing: 'border-box',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                {/* Submit Change */}
+                <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={pwLoading}
+                    style={{ minWidth: '160px', height: '42px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                  >
+                    {pwLoading ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        <span>Updating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock size={15} />
+                        <span>Update Password</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
             </div>
 
             {/* Section E: Resume Skills & Projects Context */}

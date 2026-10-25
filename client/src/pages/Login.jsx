@@ -45,8 +45,6 @@ const Login = () => {
 
     if (!password) {
       newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
     }
 
     setErrors(newErrors);
@@ -63,10 +61,13 @@ const Login = () => {
     
     try {
       await login(email.trim(), password);
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     } catch (err) {
-      const msg = err.response?.data?.message || (err.message === 'Network Error' ? 'Unable to connect to backend server. Please verify backend is running.' : 'Invalid email or password.');
-      setServerError(msg);
+      if (err.response?.status === 429) {
+        setServerError('Too many login attempts. Please wait a few minutes before trying again.');
+      } else {
+        setServerError('Invalid email or password');
+      }
     } finally {
       setSubmitting(false);
     }

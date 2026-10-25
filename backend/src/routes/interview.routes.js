@@ -13,7 +13,8 @@ import {
   addMorePracticeQuestions,
   executeInterviewCode,
   submitCodeSolution,
-  revealCodeHint
+  revealCodeHint,
+  discardInterview
 } from '../controllers/interview.controller.js';
 
 const router = express.Router();
@@ -28,6 +29,8 @@ router.get('/history', getUserInterviews);
 router.get('/', getUserInterviews);
 router.get('/:id/evaluation-status', getEvaluationStatus);
 router.get('/:id', getInterview);
+router.delete('/:id', discardInterview);
+router.post('/:id/abandon', discardInterview);
 router.patch('/:id/settings', updateInterviewSettings);
 router.post('/:id/answer', submitAnswer);
 router.post('/:id/retry', retryEvaluation);

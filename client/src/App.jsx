@@ -13,10 +13,11 @@ import InterviewResults from './pages/InterviewResults';
 import SkillGapAnalyzer from './pages/SkillGapAnalyzer';
 import SessionHistory from './pages/SessionHistory';
 import PrepPlanPage from './pages/PrepPlanPage';
+import ResetPassword from './pages/ResetPassword';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
 
-// Protected Route Wrapper
+// Protected Route Wrapper (redirects unauthenticated to /login)
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
@@ -37,6 +38,32 @@ const ProtectedRoute = ({ children }) => {
 
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  return children;
+};
+
+// Public Only Route Wrapper (redirects already-logged-in users away to /dashboard)
+const PublicOnlyRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: 'var(--bg-page, #0b0f19)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--primary, #2563eb)'
+      }}>
+        <Loader2 size={32} className="animate-spin" />
+      </div>
+    );
+  }
+
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return children;
@@ -70,9 +97,10 @@ function App() {
           <Router>
           <Routes>
           <Route path="/" element={<IndexRedirect />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+          <Route path="/signup" element={<PublicOnlyRoute><Signup /></PublicOnlyRoute>} />
+          <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
+          <Route path="/reset-password/:token" element={<PublicOnlyRoute><ResetPassword /></PublicOnlyRoute>} />
           <Route 
             path="/dashboard" 
             element={

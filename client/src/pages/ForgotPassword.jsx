@@ -7,16 +7,19 @@ import {
   ArrowLeft,
   ArrowRight,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 import Button from '../components/ui/Button';
+import api from '../services/api';
 import '../styles/auth.css';
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
+  const [serverError, setServerError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [successData, setSuccessData] = useState(null);
 
   const validate = () => {
     if (!email.trim()) {
@@ -33,11 +36,19 @@ const ForgotPassword = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setServerError('');
     if (!validate()) return;
     setSubmitting(true);
-    await new Promise(res => setTimeout(res, 900));
-    setSubmitting(false);
-    setSent(true);
+
+    try {
+      const response = await api.post('/auth/forgot-password', { email: email.trim() });
+      setSuccessData(response.data);
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to request password reset. Please try again.';
+      setServerError(msg);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -71,7 +82,7 @@ const ForgotPassword = () => {
                 </div>
                 <div>
                   <div className="feature-text">Secure Password Reset</div>
-                  <div className="feature-subtext">Direct verification link to your registered inbox</div>
+                  <div className="feature-subtext">Direct verification link with time-limited cryptographic token</div>
                 </div>
               </li>
               <li className="brand-feature-item">
@@ -88,7 +99,7 @@ const ForgotPassword = () => {
 
           <div className="brand-footer">
             <span className="proof-text">
-              Need assistance? Support team is available 24/7.
+              Technical interview preparation, calibrated to real industry standards.
             </span>
           </div>
         </div>
@@ -104,15 +115,38 @@ const ForgotPassword = () => {
               </p>
             </div>
 
-            {sent ? (
-              <div style={{ textAlign: 'left', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '24px', borderRadius: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#60a5fa', marginBottom: '8px', fontWeight: 600 }}>
+            {serverError && (
+              <div className="auth-alert-error" style={{ marginBottom: '16px' }}>
+                <AlertCircle size={18} />
+                <span>{serverError}</span>
+              </div>
+            )}
+
+            {successData ? (
+              <div style={{ textAlign: 'left', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.25)', padding: '24px', borderRadius: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#60a5fa', marginBottom: '10px', fontWeight: 600 }}>
                   <CheckCircle2 size={20} />
-                  <span>Reset link simulated</span>
+                  <span>Password Reset Initiated</span>
                 </div>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.6', margin: '0 0 20px 0' }}>
-                  In a production environment with backend connected, a password reset link would be sent to <strong style={{ color: 'var(--text-primary)' }}>{email}</strong>.
+                <p style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '0.9rem', lineHeight: '1.6', margin: '0 0 16px 0' }}>
+                  {successData.message || `If an account exists for ${email}, a password reset link has been generated.`}
                 </p>
+
+                {successData.resetLink && (
+                  <div style={{ background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '12px 14px', marginBottom: '20px' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', fontWeight: 600 }}>
+                      Development Mode Reset Link
+                    </div>
+                    <a 
+                      href={successData.resetLink} 
+                      style={{ color: '#38bdf8', wordBreak: 'break-all', fontSize: '0.85rem', textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <span>Proceed to reset password</span>
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
+
                 <Link to="/login" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: '#3b82f6', fontWeight: 600, textDecoration: 'none' }}>
                   <ArrowLeft size={16} /> Back to Sign In
                 </Link>

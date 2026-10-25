@@ -24,21 +24,28 @@ const app = express();
 
 // CORS Configuration with Credentials support
 const allowedOrigins = [
-  process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  process.env.CLIENT_ORIGIN,
+  'http://localhost:5173',
   'http://localhost:5000',
+  'http://localhost:5001',
   'http://127.0.0.1:5000',
+  'http://127.0.0.1:5001',
   'http://127.0.0.1:5173'
-];
+].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
+    if (process.env.NODE_ENV === 'production') {
+      return callback(new Error('Blocked by CORS policy: Origin not allowed'));
+    }
     return callback(null, true);
   },
   credentials: true,
 }));
+
 
 // Body and Cookie Parsers
 app.use(express.json());

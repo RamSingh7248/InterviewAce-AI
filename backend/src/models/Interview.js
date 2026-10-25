@@ -113,8 +113,19 @@ const questionSchema = new mongoose.Schema(
       trim: true
     }],
     codingDetails: {
+      slug: { type: String, default: '' },
+      problemTitle: { type: String, default: '' },
       constraints: [{ type: String }],
-      examples: [exampleSchema]
+      examples: [exampleSchema],
+      sampleTestCases: [{ input: { type: String, default: '' }, expectedOutput: { type: String, default: '' } }],
+      hiddenTestCases: [{ input: { type: String, default: '' }, expectedOutput: { type: String, default: '' } }],
+      starterCode: {
+        javascript: { type: String, default: '' },
+        python: { type: String, default: '' },
+        java: { type: String, default: '' },
+        cpp: { type: String, default: '' }
+      },
+      hintsRevealed: { type: Number, default: 0 }
     },
     userAnswer: {
       type: String,
@@ -311,7 +322,26 @@ const questionSchema = new mongoose.Schema(
           maxScore: { type: Number, default: 10 },
           feedback: { type: String, default: '' }
         }
-      }
+      },
+      codeReview: {
+        correctnessScore: { type: Number, default: 0 },
+        timeComplexity: { type: String, default: '' },
+        spaceComplexity: { type: String, default: '' },
+        edgeCasesHandled: [{ type: String }],
+        edgeCasesMissed: [{ type: String }],
+        readabilityScore: { type: Number, default: 0 },
+        reviewScore: { type: Number, default: 0 },
+        strengths: [{ type: String }],
+        improvements: [{ type: String }],
+        betterApproach: { type: String, default: '' }
+      },
+      testsPassed: { type: Number, default: 0 },
+      totalTests: { type: Number, default: 0 },
+      hintsUsed: { type: Number, default: 0 },
+      hintPenalty: { type: Number, default: 0 },
+      executionOutput: { type: String, default: '' },
+      executionStderr: { type: String, default: '' },
+      runtimeMs: { type: Number, default: 0 }
     }
   },
   { _id: true }
@@ -404,7 +434,7 @@ const interviewSchema = new mongoose.Schema(
     },
     mode: {
       type: String,
-      enum: ['ai', 'demo', 'hybrid'],
+      enum: ['ai', 'demo', 'hybrid', 'coding'],
       default: 'demo'
     },
     status: {

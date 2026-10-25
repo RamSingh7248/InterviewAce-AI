@@ -12,7 +12,8 @@ import {
   updateInterviewSettings,
   addMorePracticeQuestions,
   executeInterviewCode,
-  submitCodeSolution
+  submitCodeSolution,
+  revealCodeHint
 } from '../controllers/interview.controller.js';
 
 const router = express.Router();
@@ -34,5 +35,6 @@ router.post('/:id/next', nextQuestion);
 router.post('/:id/more-questions', addMorePracticeQuestions);
 router.post('/:id/code/execute', executeInterviewCode);
 router.post('/:id/code/submit', submitCodeSolution);
+router.post('/:id/code/hint', revealCodeHint);
 
 export default router;

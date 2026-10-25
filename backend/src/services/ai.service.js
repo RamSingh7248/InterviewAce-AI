@@ -2012,11 +2012,105 @@ export const generateInterviewerReaction = ({
   return 'Okay, got it. Let\'s move on.';
 };
 
+/**
+ * Perform AI Code Review on submitted coding solution
+ */
+export const reviewCodeSubmission = async ({
+  problemTitle = '',
+  description = '',
+  code = '',
+  language = 'javascript',
+  constraints = [],
+  testsPassed = 0,
+  totalTests = 0,
+  referenceAnswer = ''
+}) => {
+  const startTime = Date.now();
+  const prompt = `You are a Principal Software Engineer conducting a Live Coding Interview code review.
+Evaluate the following candidate code submission for:
+Problem: "${problemTitle}"
+Description: ${description}
+Constraints: ${Array.isArray(constraints) ? constraints.join(', ') : ''}
+Language: ${language}
+Tests Passed: ${testsPassed}/${totalTests}
+Candidate Solution Code:
+\`\`\`${language}
+${code}
+\`\`\`
+
+Return a strictly valid JSON object matching this exact schema:
+{
+  "correctnessScore": 8,
+  "timeComplexity": "O(n)",
+  "spaceComplexity": "O(1)",
+  "edgeCasesHandled": ["Empty input", "Negative values"],
+  "edgeCasesMissed": ["Integer overflow at 10^9"],
+  "readabilityScore": 8,
+  "reviewScore": 8,
+  "strengths": ["Clean naming", "Optimal asymptotic time"],
+  "improvements": ["Guard against large inputs"],
+  "betterApproach": "A single pass solution using two pointers",
+  "feedback": "Solid implementation passing core criteria with clean code structure."
+}
+Do not include markdown code fences outside the JSON. Return only the raw JSON.`;
+
+  try {
+    const rawAi = await callGemini(prompt, 'You are an expert technical interviewer evaluating code submissions. Output only JSON.', 9000);
+    const clean = rawAi.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(clean);
+    return {
+      correctnessScore: Number(parsed.correctnessScore) || 7,
+      timeComplexity: parsed.timeComplexity || 'O(n)',
+      spaceComplexity: parsed.spaceComplexity || 'O(1)',
+      edgeCasesHandled: Array.isArray(parsed.edgeCasesHandled) ? parsed.edgeCasesHandled : ['Standard input ranges'],
+      edgeCasesMissed: Array.isArray(parsed.edgeCasesMissed) ? parsed.edgeCasesMissed : [],
+      readabilityScore: Number(parsed.readabilityScore) || 7,
+      reviewScore: Number(parsed.reviewScore) || 7,
+      strengths: Array.isArray(parsed.strengths) ? parsed.strengths : ['Valid algorithmic logic'],
+      improvements: Array.isArray(parsed.improvements) ? parsed.improvements : ['Optimize space usage'],
+      betterApproach: parsed.betterApproach || 'Consider two-pointer or prefix-sum optimizations where applicable.',
+      feedback: parsed.feedback || 'Code successfully reviewed by AI.',
+      isFallback: false,
+      evaluatorLabel: 'Gemini Code Review'
+    };
+  } catch (err) {
+    console.warn('[AI Service] Code review fallback triggered:', err.message);
+    const codeLen = (code || '').trim().length;
+    const hasLoops = /for\s*\(|while\s*\(|\.forEach|\.map/.test(code);
+    const hasBranching = /if\s*\(|switch\s*\(|\?/.test(code);
+    const passRate = totalTests > 0 ? (testsPassed / totalTests) : 0.8;
+    const reviewScore = Math.max(2, Math.min(10, Math.round(passRate * 7 + (hasLoops ? 1.5 : 0.5) + (hasBranching ? 1.5 : 0.5))));
+
+    return {
+      correctnessScore: Math.round(passRate * 10),
+      timeComplexity: hasLoops ? 'O(n)' : 'O(1)',
+      spaceComplexity: 'O(1) aux',
+      edgeCasesHandled: ['Standard input validation', 'Basic test boundaries'],
+      edgeCasesMissed: passRate < 1 ? ['Potential large scale edge cases or overflow'] : [],
+      readabilityScore: codeLen > 50 ? 8 : 5,
+      reviewScore,
+      strengths: [
+        'Structured solution with syntactically valid logic',
+        'Direct implementation addressing the primary problem objective'
+      ],
+      improvements: [
+        'Consider memory efficiency on larger input bounds',
+        'Add inline invariant documentation for complex algorithmic branches'
+      ],
+      betterApproach: referenceAnswer ? 'An optimal linear time approach using appropriate data structures.' : 'Benchmark edge conditions to verify sub-quadratic runtime.',
+      feedback: `The solution was evaluated against automated test cases (${testsPassed}/${totalTests} passed) and analyzed for algorithmic structure.`,
+      isFallback: true,
+      evaluatorLabel: 'Basic evaluation (AI unavailable)'
+    };
+  }
+};
+
 export default {
   generateQuestions,
   generateAdaptiveFollowUpQuestion,
   generateInterviewerReaction,
   evaluateAnswer,
+  reviewCodeSubmission,
   retrieveCuratedQuestions,
   generateCategoryFallbackQuestions,
   validateQuestionSubject

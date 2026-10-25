@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import Button from '../ui/Button';
 import api from '../../services/api';
+import { runInWebWorker } from '../../utils/webWorkerRunner';
 
 const STARTER_TEMPLATES = {
   java: `public class Main {
@@ -164,7 +165,9 @@ export default function LiveCodingStudio({
     }
   };
 
-  // Run Code via POST /api/interviews/:id/code/execute
+  const [hintsRevealedCount, setHintsRevealedCount] = useState(currentQ?.codingDetails?.hintsRevealed || 0);
+
+  // Run Code: uses sandboxed Web Worker for JavaScript, or remote runner for others
   const handleRunCode = async () => {
     if (executing || submittingSolution) return;
     setErrorMsg('');
@@ -172,16 +175,22 @@ export default function LiveCodingStudio({
     setActiveConsoleTab('output');
 
     try {
-      const response = await api.post(`/interviews/${interview._id}/code/execute`, {
-        code,
-        language: selectedLang,
-        stdin
-      });
-
-      if (response.data && response.data.status === 'success' && response.data.execution) {
-        setExecutionResult(response.data.execution);
+      if (selectedLang === 'javascript') {
+        const sampleIn = stdin || (currentQ?.codingDetails?.sampleTestCases?.[0]?.input || '');
+        const res = await runInWebWorker({ code, stdin: sampleIn, timeoutMs: 3000 });
+        setExecutionResult(res);
       } else {
-        setErrorMsg('Code execution completed without valid output.');
+        const response = await api.post(`/interviews/${interview._id}/code/execute`, {
+          code,
+          language: selectedLang,
+          stdin
+        });
+
+        if (response.data && response.data.status === 'success' && response.data.execution) {
+          setExecutionResult(response.data.execution);
+        } else {
+          setErrorMsg('Code execution completed without valid output.');
+        }
       }
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Execution request failed.';
@@ -195,6 +204,20 @@ export default function LiveCodingStudio({
       });
     } finally {
       setExecuting(false);
+    }
+  };
+
+  // Reveal next hint with 5% score deduction
+  const handleRevealNextHint = async () => {
+    try {
+      const res = await api.post(`/interviews/${interview._id}/code/hint`);
+      if (res.data?.status === 'success') {
+        setHintsRevealedCount(res.data.hintsRevealed);
+        setShowHint(true);
+      }
+    } catch (err) {
+      setShowHint(true);
+      setHintsRevealedCount(prev => prev + 1);
     }
   };
 
@@ -213,7 +236,8 @@ export default function LiveCodingStudio({
       const response = await api.post(`/interviews/${interview._id}/code/submit`, {
         code,
         language: selectedLang,
-        questionId: currentQ?.questionId
+        questionId: currentQ?.questionId,
+        hintsUsed: hintsRevealedCount
       });
 
       if (response.data && response.data.status === 'success') {
@@ -477,28 +501,38 @@ export default function LiveCodingStudio({
           {/* Hint Accordion */}
           {Array.isArray(currentQ?.hints) && currentQ.hints.length > 0 && (
             <div style={{ marginBottom: '20px' }}>
-              <button
-                type="button"
-                onClick={() => setShowHint(prev => !prev)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  backgroundColor: 'transparent',
-                  border: '1px dashed var(--border-subtle, #334155)',
-                  borderRadius: '8px',
-                  padding: '8px 12px',
-                  color: '#fbbf24',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  width: '100%'
-                }}
-              >
-                <Lightbulb size={15} />
-                <span>{showHint ? 'Hide Algorithmic Hint' : 'Need a hint? Click to reveal'}</span>
-              </button>
-              {showHint && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={handleRevealNextHint}
+                  disabled={hintsRevealedCount >= currentQ.hints.length}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    backgroundColor: 'rgba(251, 191, 36, 0.08)',
+                    border: '1px dashed #fbbf24',
+                    borderRadius: '8px',
+                    padding: '8px 14px',
+                    color: '#fbbf24',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: hintsRevealedCount >= currentQ.hints.length ? 'default' : 'pointer',
+                    flex: 1
+                  }}
+                >
+                  <Lightbulb size={15} />
+                  <span>
+                    {hintsRevealedCount >= currentQ.hints.length
+                      ? `All ${currentQ.hints.length} hints revealed`
+                      : `Get Hint (${hintsRevealedCount}/${currentQ.hints.length} revealed)`}
+                  </span>
+                </button>
+                <span style={{ fontSize: '0.7rem', color: '#f59e0b', whiteSpace: 'nowrap' }}>
+                  (-5% score per hint)
+                </span>
+              </div>
+              {showHint && hintsRevealedCount > 0 && (
                 <div style={{
                   marginTop: '8px',
                   padding: '12px 14px',
@@ -509,9 +543,9 @@ export default function LiveCodingStudio({
                   color: '#fde68a',
                   lineHeight: 1.5
                 }}>
-                  {currentQ.hints.map((h, i) => (
-                    <div key={i} style={{ marginBottom: i < currentQ.hints.length - 1 ? '6px' : 0 }}>
-                      • {h}
+                  {currentQ.hints.slice(0, hintsRevealedCount).map((h, i) => (
+                    <div key={i} style={{ marginBottom: i < hintsRevealedCount - 1 ? '6px' : 0 }}>
+                      <strong>Hint {i + 1}:</strong> {h}
                     </div>
                   ))}
                 </div>
@@ -533,18 +567,51 @@ export default function LiveCodingStudio({
                 padding: '18px',
                 marginBottom: '16px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Sparkles size={18} color="#60a5fa" />
-                    <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f8fafc' }}>AI Evaluation</span>
+                    <div>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f8fafc', display: 'block' }}>
+                        Code Assessment
+                      </span>
+                      <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
+                        {evaluation.evaluatorLabel || 'AI Evaluation'}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{
-                    fontSize: '1.1rem',
-                    fontWeight: 800,
-                    color: evaluation.score >= 7 ? '#4ade80' : evaluation.score >= 5 ? '#facc15' : '#f87171'
-                  }}>
-                    {evaluation.score} / 10
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{
+                      fontSize: '1.25rem',
+                      fontWeight: 800,
+                      color: (evaluation.score100 || (evaluation.score * 10)) >= 70 ? '#4ade80' : (evaluation.score100 || (evaluation.score * 10)) >= 50 ? '#facc15' : '#f87171'
+                    }}>
+                      {evaluation.score100 !== undefined ? `${evaluation.score100}%` : `${evaluation.score}/10`}
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                      60% tests + 40% review {evaluation.hintPenalty ? `(-${evaluation.hintPenalty}% hints)` : ''}
+                    </div>
                   </div>
+                </div>
+
+                {/* Tests Passed Metric Bar */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                  border: '1px solid #334155',
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  marginBottom: '12px',
+                  fontSize: '0.76rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#4ade80' }}>
+                    <CheckCircle2 size={14} />
+                    <span><strong>{evaluation.testsPassed ?? 0} / {evaluation.totalTests ?? 0}</strong> Test Cases Passed</span>
+                  </div>
+                  {evaluation.runtimeMs !== undefined && (
+                    <span style={{ color: '#94a3b8' }}>{evaluation.runtimeMs} ms</span>
+                  )}
                 </div>
 
                 {evaluation.feedback && (
@@ -553,21 +620,17 @@ export default function LiveCodingStudio({
                   </p>
                 )}
 
-                {/* Algorithmic Dimensions */}
-                {evaluation.dimensions && (
+                {/* Algorithmic Complexity Pills */}
+                {evaluation.codeReview && (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '14px' }}>
-                    {evaluation.dimensions.technicalCorrectness && (
-                      <div style={{ backgroundColor: 'var(--bg-surface, #0f172a)', padding: '8px 10px', borderRadius: '6px', fontSize: '0.75rem' }}>
-                        <span style={{ color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Correctness</span>
-                        <strong style={{ color: '#38bdf8' }}>{evaluation.dimensions.technicalCorrectness.score} / 10</strong>
-                      </div>
-                    )}
-                    {evaluation.dimensions.conceptualUnderstanding && (
-                      <div style={{ backgroundColor: 'var(--bg-surface, #0f172a)', padding: '8px 10px', borderRadius: '6px', fontSize: '0.75rem' }}>
-                        <span style={{ color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Complexity (Big-O)</span>
-                        <strong style={{ color: '#a855f7' }}>{evaluation.dimensions.conceptualUnderstanding.score} / 10</strong>
-                      </div>
-                    )}
+                    <div style={{ backgroundColor: 'var(--bg-surface, #0f172a)', padding: '8px 10px', borderRadius: '6px', fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Time Complexity</span>
+                      <strong style={{ color: '#38bdf8' }}>{evaluation.codeReview.timeComplexity || 'O(n)'}</strong>
+                    </div>
+                    <div style={{ backgroundColor: 'var(--bg-surface, #0f172a)', padding: '8px 10px', borderRadius: '6px', fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Space Complexity</span>
+                      <strong style={{ color: '#a855f7' }}>{evaluation.codeReview.spaceComplexity || 'O(1)'}</strong>
+                    </div>
                   </div>
                 )}
 
@@ -583,15 +646,30 @@ export default function LiveCodingStudio({
                   </div>
                 )}
 
-                {/* Suggestions */}
-                {Array.isArray(evaluation.suggestions) && evaluation.suggestions.length > 0 && (
-                  <div>
+                {/* Improvements & Better Approach */}
+                {Array.isArray(evaluation.improvements) && evaluation.improvements.length > 0 && (
+                  <div style={{ marginBottom: '10px' }}>
                     <div style={{ fontSize: '0.76rem', fontWeight: 700, color: '#fbbf24', marginBottom: '4px' }}>
-                      Optimizations & Edge Cases:
+                      Areas for Improvement:
                     </div>
                     <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '0.76rem', color: '#fde68a' }}>
-                      {evaluation.suggestions.map((s, idx) => <li key={idx}>{s}</li>)}
+                      {evaluation.improvements.map((s, idx) => <li key={idx}>{s}</li>)}
                     </ul>
+                  </div>
+                )}
+
+                {evaluation.betterAnswer && (
+                  <div style={{
+                    marginTop: '8px',
+                    padding: '8px 10px',
+                    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                    border: '1px solid rgba(56, 189, 248, 0.2)',
+                    borderRadius: '6px',
+                    fontSize: '0.76rem',
+                    color: '#bae6fd'
+                  }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>Optimal Approach:</strong>
+                    {evaluation.betterAnswer}
                   </div>
                 )}
 

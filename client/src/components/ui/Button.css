@@ -1,0 +1,80 @@
+/* Button Component Styles - Clean & Subtle */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s ease);
+  border: 1px solid transparent;
+  outline: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+/* Primary Button: Solid restrained blue with standard hover */
+.btn-primary {
+  background-color: var(--primary, #2563eb);
+  color: #ffffff;
+  border-color: var(--primary-hover, #1d4ed8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--primary-hover, #1d4ed8);
+  border-color: var(--primary-active, #1e40af);
+}
+
+.btn-primary:active:not(:disabled) {
+  background-color: var(--primary-active, #1e40af);
+}
+
+/* Secondary Button */
+.btn-secondary {
+  background-color: var(--bg-subtle, #131d31);
+  color: var(--text-primary, #f8fafc);
+  border: 1px solid var(--border-subtle, #1e293b);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--bg-hover, var(--border-subtle));
+  border-color: var(--border-hover, #334155);
+}
+
+/* Outline Button */
+.btn-outline {
+  background-color: transparent;
+  color: var(--text-secondary, #94a3b8);
+  border: 1px solid var(--border-subtle, #1e293b);
+}
+
+.btn-outline:hover:not(:disabled) {
+  background-color: var(--bg-subtle, #131d31);
+  color: var(--text-primary, #f8fafc);
+  border-color: var(--border-hover, #334155);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--primary, #2563eb);
+  outline-offset: 2px;
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

@@ -1,0 +1,43 @@
+/* src/styles/theme.css */
+:root {
+  --color-bg: var(--bg-page, #0b0f19);
+  --color-surface: var(--bg-surface, #0f172a);
+  --color-primary: var(--primary, #2563eb);
+  --color-primary-dark: var(--primary-hover, #1d4ed8);
+  --color-primary-light: var(--primary-text, #38bdf8);
+  --color-muted: var(--text-muted, #64748b);
+  --color-muted-light: var(--text-secondary, #94a3b8);
+  --color-white: var(--text-primary, #f8fafc);
+  --radius: 0.5rem;
+  --spacing-sm: 0.75rem;
+  --spacing-md: 1.5rem;
+  --spacing-lg: 2.5rem;
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-heading: 'Plus Jakarta Sans', var(--font-sans);
+}
+
+/* Utility classes */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--spacing-lg);
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.link {
+  color: var(--primary, #2563eb);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}

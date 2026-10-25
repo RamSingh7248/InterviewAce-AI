@@ -1,0 +1,36 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Backend API for InterviewAce AI Mock Interview Platform",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "seed": "node src/scripts/seedQuestions.js",
+    "seed:questions": "node src/scripts/seedQuestions.js",
+    "verify:questions": "node src/scripts/verifyQuestions.js",
+    "test:regression": "node src/scripts/testRegression.js",
+    "test:isolation": "node src/scripts/verifySubjectIsolation.js",
+    "test:adaptive": "node src/scripts/testAdaptiveInterviewer.js",
+    "test:personalized": "node src/scripts/testPersonalizedInterviewer.js",
+    "test:skills": "node src/scripts/testSkillGapAnalyzer.js",
+    "test:voice": "node src/scripts/testPhase3Voice.js",
+    "test:microphone": "node src/scripts/testPhase4Microphone.js",
+    "test:bugfixes": "node src/scripts/testBugFixesCameraAndLanguage.js",
+    "test:lifecycle": "node src/scripts/testInterviewRoomLifecycle.js",
+    "test:feedback": "node src/scripts/testDetailedFeedbackEvaluation.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.11.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

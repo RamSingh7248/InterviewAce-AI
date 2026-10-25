@@ -1,0 +1,14 @@
+{
+  "name": "ai-mock-interview",
+  "version": "1.0.0",
+  "private": true,
+  "description": "InterviewAce AI Mock Interview Platform",
+  "scripts": {
+    "build": "npm run build --prefix client",
+    "server": "npm run dev --prefix backend",
+    "start": "npm run build --prefix client && npm start --prefix backend",
+    "dev": "npm run build --prefix client && npm run dev --prefix backend",
+    "seed:questions": "npm run seed:questions --prefix backend",
+    "verify:questions": "npm run verify:questions --prefix backend"
+  }
+}

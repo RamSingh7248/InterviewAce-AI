@@ -8,6 +8,7 @@ import { normalizeQuestionText } from '../utils/textNormalize.js';
 import { evaluationQueue } from '../services/evaluationQueue.js';
 import { updateUserSkillProfile } from '../services/skillGap.service.js';
 import { autoCompleteMatchingTask } from '../services/prepPlan.service.js';
+import { computeVoiceMetrics } from '../utils/voiceMetrics.js';
 
 const SUPPORTED_CATEGORIES = INTERVIEW_CATALOG.categories.map(c => c.id);
 
@@ -67,7 +68,9 @@ export const createInterview = async (req, res, next) => {
       timeLimitPerQuestion = 0,
       isRevision = false,
       adaptiveMode = true,
-      focusWeakAreas = false
+      focusWeakAreas = false,
+      voiceMode = false,
+      voiceInterview = false
     } = req.body;
 
     if (!category || !SUPPORTED_CATEGORIES.includes(category)) {
@@ -416,6 +419,7 @@ export const createInterview = async (req, res, next) => {
       topic: topic ? topic.trim() : '',
       targetRole,
       interviewMode,
+      voiceMode: Boolean(voiceMode || voiceInterview || interviewMode === 'voice'),
       companyStyle,
       experienceLevel,
       language: language || 'en-US',
@@ -512,7 +516,7 @@ export const getInterview = async (req, res, next) => {
 export const submitAnswer = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { answer, questionId } = req.body;
+    const { answer, questionId, voiceMetrics } = req.body;
 
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(404).json({
@@ -542,6 +546,21 @@ export const submitAnswer = async (req, res, next) => {
         status: 'error',
         message: 'This interview session has already been completed.'
       });
+    }
+
+    const currentIndex = interview.currentQuestionIndex;
+    let currentQuestion = interview.questions[currentIndex];
+
+    if (!currentQuestion) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No active question found at this index.'
+      });
+    }
+
+    if (questionId && currentQuestion.questionId && currentQuestion.questionId !== questionId) {
+      const matchingQ = interview.questions.find(q => q.questionId === questionId);
+      if (matchingQ) currentQuestion = matchingQ;
     }
 
     // Prevent duplicate evaluation on the exact same question if already answered
@@ -593,17 +612,28 @@ export const submitAnswer = async (req, res, next) => {
       evaluation = await evaluateAnswer(evalPayload, { forceHeuristic: true });
     }
 
-    // If Gemini was unavailable or skipped in synchronous pass, enqueue for background refinement
+    // If Gemini was unavailable or skipped in synchronous pass, mark for background refinement
     const isAiEvaluated = evaluation && !evaluation.isFallback && evaluation.evaluatorLabel !== 'Basic evaluation (AI unavailable)';
     evaluation.evaluationStatus = isAiEvaluated ? 'evaluated' : 'evaluating';
 
-    if (!isAiEvaluated && currentQuestion.userAnswer && currentQuestion.userAnswer !== '[Skipped]') {
-      evaluationQueue.enqueue({
-        interviewId: interview._id,
-        questionIndex: currentIndex,
-        questionId: currentQuestion.questionId,
-        evalArgs: evalPayload
-      });
+    // Compute or enrich voiceMetrics if voice session or voiceMetrics provided
+    let processedVoiceMetrics = null;
+    if (voiceMetrics || interview.voiceMode) {
+      processedVoiceMetrics = computeVoiceMetrics(currentQuestion.userAnswer, voiceMetrics || {});
+      currentQuestion.voiceMetrics = processedVoiceMetrics;
+      if (evaluation) {
+        evaluation.voiceMetrics = processedVoiceMetrics;
+        if (!evaluation.scores) {
+          evaluation.scores = { technicalAccuracy: 7, completeness: 7, depth: 7, clarity: 7, communication: 7 };
+        }
+        let commScore = evaluation.scores.communication || 7;
+        if (processedVoiceMetrics.fillerWordsCount > 4) {
+          commScore = Math.max(3, commScore - 1);
+        } else if (processedVoiceMetrics.fillerWordsCount === 0 && processedVoiceMetrics.wpm >= 110 && processedVoiceMetrics.wpm <= 165) {
+          commScore = Math.min(10, Math.max(commScore + 1, 8));
+        }
+        evaluation.scores.communication = commScore;
+      }
     }
 
     // Save candidate answer, evaluation, and timestamps
@@ -643,7 +673,12 @@ export const submitAnswer = async (req, res, next) => {
     if (!Array.isArray(interview.interviewerReactions)) {
       interview.interviewerReactions = [];
     }
-    interview.interviewerReactions.push(reaction);
+    interview.interviewerReactions.push({
+      questionIndex: currentIndex,
+      reactionText: reaction,
+      tone: interview.companyStyle || 'General Tech',
+      timestamp: new Date()
+    });
 
     // 2. Track Running Adaptive Difficulty
     const qScore = evaluation.score || (evaluation.overallScore !== undefined ? evaluation.overallScore : 0);
@@ -839,6 +874,15 @@ export const submitAnswer = async (req, res, next) => {
 
     interview.markModified('conversationHistory');
     await interview.save();
+
+    if (!isAiEvaluated && currentQuestion.userAnswer && currentQuestion.userAnswer !== '[Skipped]') {
+      evaluationQueue.enqueue({
+        interviewId: interview._id,
+        questionIndex: currentIndex,
+        questionId: currentQuestion.questionId,
+        evalArgs: evalPayload
+      });
+    }
 
     return res.status(200).json({
       status: 'success',

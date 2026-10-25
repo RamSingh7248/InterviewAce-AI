@@ -341,7 +341,27 @@ const questionSchema = new mongoose.Schema(
       hintPenalty: { type: Number, default: 0 },
       executionOutput: { type: String, default: '' },
       executionStderr: { type: String, default: '' },
-      runtimeMs: { type: Number, default: 0 }
+      runtimeMs: { type: Number, default: 0 },
+      voiceMetrics: {
+        wpm: { type: Number, default: 0 },
+        wordsCount: { type: Number, default: 0 },
+        durationSeconds: { type: Number, default: 0 },
+        fillerWordsCount: { type: Number, default: 0 },
+        fillerWords: [{ type: String }],
+        pauseCount: { type: Number, default: 0 },
+        paceAssessment: { type: String, default: '' },
+        clarityTip: { type: String, default: '' }
+      }
+    },
+    voiceMetrics: {
+      wpm: { type: Number, default: 0 },
+      wordsCount: { type: Number, default: 0 },
+      durationSeconds: { type: Number, default: 0 },
+      fillerWordsCount: { type: Number, default: 0 },
+      fillerWords: [{ type: String }],
+      pauseCount: { type: Number, default: 0 },
+      paceAssessment: { type: String, default: '' },
+      clarityTip: { type: String, default: '' }
     }
   },
   { _id: true }
@@ -354,6 +374,10 @@ const interviewSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
       index: true
+    },
+    voiceMode: {
+      type: Boolean,
+      default: false
     },
     category: {
       type: String,

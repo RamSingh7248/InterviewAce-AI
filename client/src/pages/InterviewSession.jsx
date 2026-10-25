@@ -38,6 +38,7 @@ import CandidateVideoTile from '../components/interview/CandidateVideoTile';
 import RoomControlDock from '../components/interview/RoomControlDock';
 import DeviceCheckModal from '../components/interview/DeviceCheckModal';
 import voiceManager from '../services/voiceManager';
+import { analyzeTranscriptMetrics } from '../utils/voiceMetricsCalculator';
 import '../styles/auth.css';
 
 // Interview mode labels for display
@@ -171,6 +172,14 @@ const InterviewSession = () => {
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
+
+  // Silence detection & Voice Metrics (Phase 6)
+  const [isSilenceDetected, setIsSilenceDetected] = useState(false);
+  const [liveVoiceMetrics, setLiveVoiceMetrics] = useState(null);
+  const silenceTimeoutRef = useRef(null);
+  const speechStartTimeRef = useRef(null);
+  const lastResultTimeRef = useRef(null);
+  const pauseCountRef = useRef(0);
 
   // 1-second pulse to update timestamp-based calculations without mutating state accumulators
   useEffect(() => {
@@ -481,6 +490,27 @@ const InterviewSession = () => {
       recognition.onresult = (event) => {
         if (instanceId !== recognitionInstanceIdRef.current) return;
 
+        const now = Date.now();
+        if (!speechStartTimeRef.current) {
+          speechStartTimeRef.current = now;
+        }
+        if (lastResultTimeRef.current && (now - lastResultTimeRef.current) > 1500) {
+          pauseCountRef.current += 1;
+        }
+        lastResultTimeRef.current = now;
+
+        // Reset silence detection timer (3.5s)
+        setIsSilenceDetected(false);
+        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+        silenceTimeoutRef.current = setTimeout(() => {
+          if (isComponentMountedRef.current && isListeningRef.current) {
+            const currentFull = (committedTranscriptRef.current + ' ' + currentSessionFinalRef.current).trim();
+            if (currentFull.split(/\s+/).filter(Boolean).length >= 4) {
+              setIsSilenceDetected(true);
+            }
+          }
+        }, 3500);
+
         let sessionFinal = '';
         let sessionInterim = '';
 
@@ -496,6 +526,12 @@ const InterviewSession = () => {
         currentSessionFinalRef.current = sessionFinal;
         currentSessionInterimRef.current = sessionInterim;
         syncAnswerState(sessionFinal, sessionInterim);
+
+        // Update live voice metrics
+        const fullSoFar = (committedTranscriptRef.current + ' ' + sessionFinal).trim();
+        const durationSec = Math.max(1, Math.round((now - speechStartTimeRef.current) / 1000));
+        const liveMetrics = analyzeTranscriptMetrics(fullSoFar, durationSec, pauseCountRef.current);
+        setLiveVoiceMetrics(liveMetrics);
       };
 
       recognition.onerror = (event) => {
@@ -892,9 +928,17 @@ const InterviewSession = () => {
     const currentQ = interview?.questions?.[interview.currentQuestionIndex];
 
     try {
+      const durationSec = speechStartTimeRef.current 
+        ? Math.max(1, Math.round((Date.now() - speechStartTimeRef.current) / 1000))
+        : 0;
+      const finalVoiceMetrics = analyzeTranscriptMetrics(answer.trim(), durationSec, pauseCountRef.current);
+      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+      setIsSilenceDetected(false);
+
       const response = await api.post(`/interviews/${id}/answer`, {
         answer: answer.trim(),
-        questionId: currentQ?.questionId
+        questionId: currentQ?.questionId,
+        voiceMetrics: finalVoiceMetrics
       });
       if (response.data && response.data.status === 'success') {
         setEvaluation(response.data.evaluation);
@@ -1019,6 +1063,12 @@ const InterviewSession = () => {
         setShowHint(false);
         setConfidence(null);
         setInterviewerState('ready');
+        speechStartTimeRef.current = null;
+        lastResultTimeRef.current = null;
+        pauseCountRef.current = 0;
+        setIsSilenceDetected(false);
+        setLiveVoiceMetrics(null);
+        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to advance to the next question.');
@@ -1479,6 +1529,81 @@ const InterviewSession = () => {
             boxShadow: 'var(--shadow-card)',
             marginBottom: '20px'
           }}>
+            {/* Audio Privacy Guarantee Banner */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              backgroundColor: 'rgba(34, 197, 94, 0.08)',
+              border: '1px solid rgba(34, 197, 94, 0.2)',
+              borderRadius: '8px',
+              padding: '6px 12px',
+              marginBottom: '14px',
+              fontSize: '0.76rem',
+              color: '#4ade80'
+            }}>
+              <Shield size={14} />
+              <span>
+                <strong>Local Audio Privacy</strong>: No audio is recorded or stored on any server. Your voice is transcribed locally in your browser.
+              </span>
+            </div>
+
+            {/* Silence Detection Toast / Banner */}
+            {isSilenceDetected && !submitting && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: 'rgba(234, 179, 8, 0.12)',
+                border: '1px solid rgba(234, 179, 8, 0.35)',
+                borderRadius: '10px',
+                padding: '10px 14px',
+                marginBottom: '14px',
+                animation: 'fadeIn 0.2s ease-in'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#facc15', fontSize: '0.82rem', fontWeight: 600 }}>
+                  <Clock size={15} />
+                  <span>Pause detected (3.5s silence) — Ready to submit, or keep speaking to add more technical depth.</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSilenceDetected(false);
+                      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid rgba(234, 179, 8, 0.4)',
+                      color: '#facc15',
+                      borderRadius: '6px',
+                      padding: '4px 10px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Keep Speaking
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSubmitAnswer()}
+                    style={{
+                      backgroundColor: '#eab308',
+                      border: 'none',
+                      color: '#000',
+                      fontWeight: 700,
+                      borderRadius: '6px',
+                      padding: '4px 12px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Submit Now
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Header row of response box */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -1509,6 +1634,11 @@ const InterviewSession = () => {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {liveVoiceMetrics && liveVoiceMetrics.wordsCount > 2 && (
+                  <span style={{ color: liveVoiceMetrics.badgeColor, fontWeight: 700 }}>
+                    {liveVoiceMetrics.wpm} WPM · {liveVoiceMetrics.fillerWordsCount} fillers
+                  </span>
+                )}
                 <select
                   value={sessionLanguage}
                   onChange={(e) => handleLanguageChange(e.target.value)}
@@ -1811,6 +1941,54 @@ const InterviewSession = () => {
               <Lock size={14} />
               <span>Model answers and comprehensive reference solutions are withheld during the live interview and will be revealed on the final assessment results screen.</span>
             </div>
+
+            {/* Vocal Delivery & Speech Insights (Phase 6) */}
+            {(evaluation.voiceMetrics || currentQ?.voiceMetrics) && (
+              <div style={{
+                backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                borderRadius: '12px',
+                padding: '16px 20px',
+                marginBottom: '18px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#38bdf8', fontWeight: 700, fontSize: '0.88rem' }}>
+                    <Mic size={16} /> Vocal Delivery & Speech Insights
+                  </div>
+                  <span style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: (evaluation.voiceMetrics || currentQ?.voiceMetrics).wpm >= 115 && (evaluation.voiceMetrics || currentQ?.voiceMetrics).wpm <= 165 ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.2)',
+                    color: (evaluation.voiceMetrics || currentQ?.voiceMetrics).wpm >= 115 && (evaluation.voiceMetrics || currentQ?.voiceMetrics).wpm <= 165 ? '#4ade80' : '#facc15'
+                  }}>
+                    {(evaluation.voiceMetrics || currentQ?.voiceMetrics).paceAssessment}
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+                  <div style={{ backgroundColor: 'var(--bg-surface)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Speaking Rate</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{(evaluation.voiceMetrics || currentQ?.voiceMetrics).wpm} <span style={{ fontSize: '0.75rem', fontWeight: 500 }}>WPM</span></div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg-surface)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Filler Words</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 700, color: (evaluation.voiceMetrics || currentQ?.voiceMetrics).fillerWordsCount > 3 ? '#ef4444' : '#22c55e' }}>{(evaluation.voiceMetrics || currentQ?.voiceMetrics).fillerWordsCount}</div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg-surface)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Spoken Duration</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{(evaluation.voiceMetrics || currentQ?.voiceMetrics).durationSeconds}s</div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg-surface)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Natural Pauses</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{(evaluation.voiceMetrics || currentQ?.voiceMetrics).pauseCount || 0}</div>
+                  </div>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  💡 {(evaluation.voiceMetrics || currentQ?.voiceMetrics).clarityTip}
+                </p>
+              </div>
+            )}
 
             {/* Actionable Suggestions */}
             {Array.isArray(evaluation.suggestions) && evaluation.suggestions.length > 0 && (

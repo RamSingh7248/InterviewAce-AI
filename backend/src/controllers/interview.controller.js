@@ -6,6 +6,7 @@ import { INTERVIEW_CATALOG, normalizeCategory } from '../config/interviewCatalog
 import { normalizeQuestionText } from '../utils/textNormalize.js';
 import { evaluationQueue } from '../services/evaluationQueue.js';
 import { updateUserSkillProfile } from '../services/skillGap.service.js';
+import { autoCompleteMatchingTask } from '../services/prepPlan.service.js';
 
 const SUPPORTED_CATEGORIES = INTERVIEW_CATALOG.categories.map(c => c.id);
 
@@ -736,6 +737,15 @@ export const submitAnswer = async (req, res, next) => {
       // Trigger deterministic SkillProfile update in background
       updateUserSkillProfile(interview.userId, interview.targetRole).catch(err => {
         console.warn('[Interview Controller] SkillProfile update notice:', err.message);
+      });
+
+      // Auto-complete any matching prep plan tasks
+      autoCompleteMatchingTask(interview.userId, {
+        category: interview.category,
+        topic: interview.topic,
+        finalScore: interview.finalScore
+      }).catch(err => {
+        console.warn('[Interview Controller] PrepPlan auto-complete notice:', err.message);
       });
     } else {
       interview.sessionState = 'awaiting_answer';

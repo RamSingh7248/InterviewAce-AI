@@ -12,7 +12,12 @@ import {
   Clock,
   Layers,
   ChevronRight,
-  Target
+  Target,
+  Calendar,
+  CheckSquare,
+  Square,
+  Flame,
+  BookOpen
 } from 'lucide-react';
 import Button from '../components/ui/Button';
 
@@ -21,21 +26,27 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState({ completedCount: 0, averageScore: null, recent: [] });
   const [skillOverview, setSkillOverview] = useState(null);
+  const [currentPlan, setCurrentPlan] = useState(null);
+  const [togglingTaskId, setTogglingTaskId] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
     const fetchStats = async () => {
       try {
-        const [statsRes, skillsRes] = await Promise.allSettled([
+        const [statsRes, skillsRes, planRes] = await Promise.allSettled([
           api.get('/interviews/stats'),
-          api.get('/skills/overview')
+          api.get('/skills/overview'),
+          api.get('/prep-plan/current')
         ]);
         if (isMounted && statsRes.status === 'fulfilled' && statsRes.value?.data?.status === 'success') {
           setStats(statsRes.value.data.stats);
         }
         if (isMounted && skillsRes.status === 'fulfilled' && skillsRes.value?.data?.status === 'success') {
           setSkillOverview(skillsRes.value.data.data);
+        }
+        if (isMounted && planRes.status === 'fulfilled' && planRes.value?.data?.status === 'success') {
+          setCurrentPlan(planRes.value.data.plan);
         }
       } catch (err) {
         console.warn('Could not fetch dashboard stats:', err.message);
@@ -46,6 +57,26 @@ const Dashboard = () => {
     fetchStats();
     return () => { isMounted = false; };
   }, []);
+
+  const handleTogglePlanTask = async (taskId, currentStatus) => {
+    if (!currentPlan) return;
+    const targetDayNumber = currentPlan.currentDay || 1;
+    setTogglingTaskId(taskId);
+    try {
+      const res = await api.patch('/prep-plan/current/task', {
+        dayNumber: targetDayNumber,
+        taskId,
+        completed: !currentStatus
+      });
+      if (res.data?.status === 'success') {
+        setCurrentPlan(res.data.plan);
+      }
+    } catch (err) {
+      console.warn('Failed to toggle prep task:', err.message);
+    } finally {
+      setTogglingTaskId(null);
+    }
+  };
 
   const getScoreColor = (score) => {
     if (score >= 70) return 'var(--success-text)';
@@ -340,6 +371,254 @@ const Dashboard = () => {
               >
                 <span>Edit Preferences</span>
                 <ChevronRight size={13} />
+              </Link>
+            </div>
+          </section>
+
+          {/* Card: Today's Preparation Plan (Phase 4) */}
+          <section style={{ 
+            backgroundColor: 'var(--bg-surface)', 
+            border: '1px solid var(--border-subtle)', 
+            borderRadius: 'var(--radius-lg, 12px)', 
+            padding: '22px',
+            boxShadow: 'var(--shadow-card)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            transition: 'all var(--transition-fast)'
+          }}>
+            <div>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                marginBottom: '14px' 
+              }}>
+                <h2 style={{ 
+                  fontSize: '0.98rem', 
+                  fontWeight: 600, 
+                  margin: 0, 
+                  color: 'var(--text-primary)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '8px' 
+                }}>
+                  <Calendar size={17} style={{ color: 'var(--primary-text)' }} />
+                  <span>Today's Preparation Plan</span>
+                </h2>
+                <Link
+                  to="/plan"
+                  style={{ 
+                    fontSize: '0.78rem', 
+                    color: 'var(--primary-text)',
+                    textDecoration: 'none',
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <span>Full Schedule</span>
+                  <ChevronRight size={13} />
+                </Link>
+              </div>
+
+              {currentPlan ? (() => {
+                const todayDay = currentPlan.schedule?.find(d => d.dayNumber === (currentPlan.currentDay || 1)) || currentPlan.schedule?.[0];
+                const dayTasks = todayDay?.tasks || [];
+                const completedCount = dayTasks.filter(t => t.completed).length;
+
+                return (
+                  <div>
+                    {/* Plan Summary Bar */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: 'var(--bg-card-subtle)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      padding: '10px 14px',
+                      marginBottom: '12px'
+                    }}>
+                      <div>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          Day {todayDay?.dayNumber || 1} of {currentPlan.totalDays} • {todayDay?.theme || 'Focused Practice'}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {currentPlan.targetRole} ({currentPlan.level})
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          backgroundColor: 'var(--warning-subtle)',
+                          color: 'var(--warning-text)',
+                          padding: '3px 8px',
+                          borderRadius: 'var(--radius-pill, 9999px)',
+                          fontSize: '0.75rem',
+                          fontWeight: 700
+                        }}>
+                          <Flame size={13} />
+                          <span>{currentPlan.streakDays || 0}d streak</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                        <span>Overall Roadmap Progress</span>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{currentPlan.progressPercentage || 0}%</span>
+                      </div>
+                      <div style={{ width: '100%', height: '6px', backgroundColor: 'var(--bg-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${currentPlan.progressPercentage || 0}%`,
+                          height: '100%',
+                          backgroundColor: 'var(--primary)',
+                          borderRadius: '3px',
+                          transition: 'width 0.3s ease'
+                        }} />
+                      </div>
+                    </div>
+
+                    {/* Today's Tasks */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                      {dayTasks.map((task) => (
+                        <div
+                          key={task.taskId}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: task.completed ? 'var(--bg-subtle)' : 'var(--bg-card-subtle)',
+                            border: `1px solid ${task.completed ? 'var(--border-subtle)' : 'var(--border-subtle)'}`,
+                            borderRadius: '6px',
+                            padding: '8px 10px',
+                            opacity: task.completed ? 0.75 : 1,
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <div 
+                            onClick={() => handleTogglePlanTask(task.taskId, task.completed)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '9px', cursor: 'pointer', flex: 1, minWidth: 0 }}
+                          >
+                            <button
+                              type="button"
+                              disabled={togglingTaskId === task.taskId}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                padding: 0,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                color: task.completed ? 'var(--success-text)' : 'var(--text-muted)'
+                              }}
+                            >
+                              {task.completed ? <CheckSquare size={16} /> : <Square size={16} />}
+                            </button>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{
+                                fontSize: '0.82rem',
+                                fontWeight: 500,
+                                color: task.completed ? 'var(--text-muted)' : 'var(--text-primary)',
+                                textDecoration: task.completed ? 'line-through' : 'none',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                {task.title}
+                              </div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ textTransform: 'capitalize' }}>{task.type}</span>
+                                <span>•</span>
+                                <span>{task.estimatedMinutes} min</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {task.deepLinkConfig?.category && !task.completed && (
+                            <Link
+                              to={`/interview/setup?category=${encodeURIComponent(task.deepLinkConfig.category)}&topic=${encodeURIComponent(task.deepLinkConfig.topic || '')}&difficulty=${encodeURIComponent(task.deepLinkConfig.difficulty || 'Medium')}`}
+                              style={{
+                                fontSize: '0.72rem',
+                                color: 'var(--primary-text)',
+                                textDecoration: 'none',
+                                fontWeight: 600,
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                backgroundColor: 'var(--primary-subtle)',
+                                border: '1px solid var(--primary-border)',
+                                whiteSpace: 'nowrap',
+                                marginLeft: '8px'
+                              }}
+                            >
+                              Launch
+                            </Link>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })() : (
+                <div style={{
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  border: '1px dashed var(--border-subtle)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  padding: '24px 16px',
+                  textAlign: 'center',
+                  color: 'var(--text-muted)'
+                }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--bg-subtle)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 10px auto',
+                    color: 'var(--primary-text)'
+                  }}>
+                    <Calendar size={18} />
+                  </div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.88rem', marginBottom: '4px' }}>
+                    No Active Prep Schedule
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0 0 14px 0', lineHeight: 1.4 }}>
+                    Generate a 7, 14, or 30-day personalized schedule targeting your weakest areas with spaced revision.
+                  </p>
+                  <Button
+                    variant="secondary"
+                    onClick={() => navigate('/plan')}
+                    style={{ fontSize: '0.8rem', padding: '0 14px', height: '32px' }}
+                  >
+                    Build Preparation Plan
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px', marginTop: '16px' }}>
+              <Link
+                to="/plan"
+                style={{
+                  color: 'var(--primary-text)',
+                  textDecoration: 'none',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <span>{currentPlan ? 'View Full Day-by-Day Schedule & Study Notes' : 'Create Custom Preparation Roadmap'}</span>
+                <ArrowRight size={14} />
               </Link>
             </div>
           </section>

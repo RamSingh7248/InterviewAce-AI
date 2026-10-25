@@ -12,6 +12,7 @@ import authRoutes from './routes/auth.routes.js';
 import interviewRoutes from './routes/interview.routes.js';
 import questionRoutes from './routes/question.routes.js';
 import skillRoutes from './routes/skill.routes.js';
+import prepPlanRoutes from './routes/prepPlan.routes.js';
 
 dotenv.config();
 
@@ -74,6 +75,9 @@ app.use('/api/questions', questionRoutes);
 
 // Skill Gap Analyzer Routes
 app.use('/api/skills', skillRoutes);
+
+// Personalized Preparation Plan Routes
+app.use('/api/prep-plan', prepPlanRoutes);
 
 // 404 handler for undefined API routes
 app.all('/api/*', (req, res) => {

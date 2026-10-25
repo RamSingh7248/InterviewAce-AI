@@ -14,6 +14,7 @@ const Navbar = () => {
         <ul style={styles.links} className="nav-links">
           <li><a href="/" style={styles.link}>Home</a></li>
           <li><a href="/dashboard" style={styles.link}>Dashboard</a></li>
+          <li><a href="/plan" style={styles.link}>Prep Plan</a></li>
           <li><a href="/interview/setup" style={styles.link}>Start Mock</a></li>
           <li><a href="/profile" style={styles.link}>Profile</a></li>
         </ul>
@@ -27,6 +28,7 @@ const Navbar = () => {
         <ul style={styles.mobileLinks} className="mobile-nav-links">
           <li><a href="/" style={styles.link}>Home</a></li>
           <li><a href="/dashboard" style={styles.link}>Dashboard</a></li>
+          <li><a href="/plan" style={styles.link}>Prep Plan</a></li>
           <li><a href="/interview/setup" style={styles.link}>Start Mock</a></li>
           <li><a href="/profile" style={styles.link}>Profile</a></li>
         </ul>

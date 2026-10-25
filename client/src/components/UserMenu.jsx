@@ -12,7 +12,8 @@ import {
   Monitor,
   Check,
   Target,
-  History
+  History,
+  Calendar
 } from 'lucide-react';
 
 export const UserMenu = () => {
@@ -278,6 +279,28 @@ export const UserMenu = () => {
             >
               <Target size={15} style={{ color: 'var(--primary-text)' }} />
               <span>Skill Gap Analyzer</span>
+            </Link>
+
+            <Link
+              to="/plan"
+              onClick={() => setIsOpen(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '9px',
+                padding: '8px 10px',
+                borderRadius: 'var(--radius-sm, 6px)',
+                color: 'var(--text-primary)',
+                textDecoration: 'none',
+                fontSize: '0.84rem',
+                fontWeight: 500,
+                transition: 'background var(--transition-fast, 0.15s ease)'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-subtle)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <Calendar size={15} style={{ color: 'var(--primary-text)' }} />
+              <span>Preparation Plan</span>
             </Link>
 
             <Link

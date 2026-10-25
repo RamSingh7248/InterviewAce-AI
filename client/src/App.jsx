@@ -12,6 +12,7 @@ import InterviewSession from './pages/InterviewSession';
 import InterviewResults from './pages/InterviewResults';
 import SkillGapAnalyzer from './pages/SkillGapAnalyzer';
 import SessionHistory from './pages/SessionHistory';
+import PrepPlanPage from './pages/PrepPlanPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
 
@@ -125,6 +126,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <SessionHistory />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/plan" 
+            element={
+              <ProtectedRoute>
+                <PrepPlanPage />
               </ProtectedRoute>
             } 
           />

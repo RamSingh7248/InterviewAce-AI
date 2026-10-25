@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import Interview from '../models/Interview.js';
-import { generateQuestions, evaluateAnswer, generateAdaptiveFollowUpQuestion, isTooSimilar, generateCategoryFallbackQuestions } from '../services/ai.service.js';
+import { generateQuestions, evaluateAnswer, generateAdaptiveFollowUpQuestion, generateInterviewerReaction, isTooSimilar, generateCategoryFallbackQuestions } from '../services/ai.service.js';
 import { executeCode as executeCodeService } from '../services/codeExecution.service.js';
 import { INTERVIEW_CATALOG, normalizeCategory } from '../config/interviewCatalog.js';
 import { normalizeQuestionText } from '../utils/textNormalize.js';
@@ -59,7 +59,9 @@ export const createInterview = async (req, res, next) => {
       language = 'en-US',
       timedMode = false,
       timeLimitPerQuestion = 0,
-      isRevision = false
+      isRevision = false,
+      adaptiveMode = true,
+      focusWeakAreas = false
     } = req.body;
 
     if (!category || !SUPPORTED_CATEGORIES.includes(category)) {
@@ -346,6 +348,12 @@ export const createInterview = async (req, res, next) => {
       askedQuestionTexts: formattedQuestions.map(q => q.normalizedText).filter(Boolean),
       historyReset: Boolean(historyReset),
       historyResetMessage: historyResetMessage || '',
+      adaptiveMode: adaptiveMode !== undefined ? Boolean(adaptiveMode) : true,
+      focusWeakAreas: Boolean(focusWeakAreas),
+      currentDifficulty: difficulty,
+      consecutiveStrongAnswers: 0,
+      consecutiveWeakAnswers: 0,
+      interviewerReactions: [],
       conversationHistory: [],
       questions: formattedQuestions
     });
@@ -534,7 +542,149 @@ export const submitAnswer = async (req, res, next) => {
       timestamp: new Date()
     });
 
-    // Check if this was the final question in session
+    // 1. Generate Interviewer Persona Reaction
+    let reaction = '';
+    try {
+      reaction = await generateInterviewerReaction({
+        companyStyle: interview.companyStyle,
+        verdict: evaluation.verdict,
+        score: evaluation.score,
+        language: interview.language,
+        topic: currentQuestion.topic || interview.category
+      });
+    } catch (rErr) {
+      reaction = evaluation.verdict === 'correct' ? 'Solid explanation, let us continue.' : 'Got it. Moving on to the next concept.';
+    }
+    currentQuestion.interviewerReaction = reaction;
+    if (!Array.isArray(interview.interviewerReactions)) {
+      interview.interviewerReactions = [];
+    }
+    interview.interviewerReactions.push(reaction);
+
+    // 2. Track Running Adaptive Difficulty
+    const qScore = evaluation.score || (evaluation.overallScore !== undefined ? evaluation.overallScore : 0);
+    const difficulties = ['Easy', 'Medium', 'Hard'];
+    let curDiffIdx = difficulties.indexOf(interview.currentDifficulty || interview.difficulty || 'Medium');
+    if (curDiffIdx === -1) curDiffIdx = 1;
+
+    if (interview.adaptiveMode !== false) {
+      if (qScore >= 7.5) {
+        interview.consecutiveStrongAnswers = (interview.consecutiveStrongAnswers || 0) + 1;
+        interview.consecutiveWeakAnswers = 0;
+        if (interview.consecutiveStrongAnswers >= 2) {
+          if (curDiffIdx < 2) {
+            curDiffIdx += 1;
+            interview.currentDifficulty = difficulties[curDiffIdx];
+          }
+          interview.consecutiveStrongAnswers = 0;
+        }
+      } else if (qScore < 5.0) {
+        interview.consecutiveWeakAnswers = (interview.consecutiveWeakAnswers || 0) + 1;
+        interview.consecutiveStrongAnswers = 0;
+        if (interview.consecutiveWeakAnswers >= 1) {
+          if (curDiffIdx > 0) {
+            curDiffIdx -= 1;
+            interview.currentDifficulty = difficulties[curDiffIdx];
+          }
+          interview.consecutiveWeakAnswers = 0;
+        }
+      } else {
+        interview.consecutiveStrongAnswers = 0;
+        interview.consecutiveWeakAnswers = 0;
+      }
+    }
+
+    // 3. Smart Follow-Up Generation (for vague/partial/wrong answers on non-follow-up questions)
+    let followUpAdded = false;
+    const isPartialOrWrong = evaluation.verdict === 'partially_correct' || 
+                             evaluation.verdict === 'incorrect' || 
+                             (qScore < 6.5 && qScore > 0);
+
+    if (interview.adaptiveMode !== false && !currentQuestion.isFollowUp && isPartialOrWrong) {
+      try {
+        const pastSessions = await Interview.find({ userId: req.user._id, category: interview.category })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .select('askedQuestionTexts askedQuestionIds')
+          .lean();
+
+        const userAskedNormalized = new Set(interview.askedQuestionTexts || []);
+        const userAskedIds = new Set(interview.askedQuestionIds || []);
+        if (Array.isArray(interview.questions)) {
+          interview.questions.forEach(q => {
+            if (q.normalizedText) userAskedNormalized.add(q.normalizedText);
+            if (q.questionId) userAskedIds.add(q.questionId);
+          });
+        }
+        if (currentQuestion?.normalizedText) userAskedNormalized.add(currentQuestion.normalizedText);
+        if (currentQuestion?.questionId) userAskedIds.add(currentQuestion.questionId);
+        for (const session of pastSessions) {
+          if (Array.isArray(session.askedQuestionTexts)) {
+            session.askedQuestionTexts.forEach(t => t && userAskedNormalized.add(t));
+          }
+          if (Array.isArray(session.askedQuestionIds)) {
+            session.askedQuestionIds.forEach(id => id && userAskedIds.add(id));
+          }
+        }
+
+        const adaptiveQuestion = await generateAdaptiveFollowUpQuestion({
+          category: interview.category,
+          difficulty: interview.currentDifficulty || interview.difficulty,
+          targetRole: interview.targetRole,
+          experienceLevel: interview.experienceLevel,
+          interviewMode: interview.interviewMode,
+          companyStyle: interview.companyStyle,
+          previousQuestion: currentQuestion,
+          userAnswer: currentQuestion.userAnswer,
+          evaluation,
+          excludeNormalized: Array.from(userAskedNormalized),
+          excludeIds: Array.from(userAskedIds),
+          conversationHistory: interview.conversationHistory || [],
+          parentQuestionId: currentQuestion.questionId,
+          language: interview.language || 'en-US'
+        });
+
+        if (adaptiveQuestion) {
+          const norm = adaptiveQuestion.normalizedText || normalizeQuestionText(adaptiveQuestion.questionText);
+          const isDuplicateInSession = interview.questions.some(q => {
+            const qNorm = q.normalizedText || normalizeQuestionText(q.questionText);
+            return qNorm === norm || isTooSimilar(qNorm, norm, 0.65);
+          });
+
+          if (!isDuplicateInSession) {
+            adaptiveQuestion.isFollowUp = true;
+            adaptiveQuestion.order = currentIndex + 1;
+            adaptiveQuestion.parentQuestionId = currentQuestion.questionId;
+            adaptiveQuestion.category = interview.category;
+            adaptiveQuestion.isAnswered = false;
+
+            // Splice follow-up into questions array immediately after current question
+            interview.questions.splice(currentIndex + 1, 0, adaptiveQuestion);
+            interview.totalQuestions = interview.questions.length;
+
+            // Re-index remaining questions
+            for (let i = currentIndex + 1; i < interview.questions.length; i++) {
+              interview.questions[i].order = i;
+            }
+
+            if (adaptiveQuestion.questionId) {
+              interview.askedQuestionIds.push(adaptiveQuestion.questionId);
+            }
+            if (norm) {
+              interview.askedQuestionTexts.push(norm);
+            }
+            interview.markModified('questions');
+            interview.markModified('askedQuestionIds');
+            interview.markModified('askedQuestionTexts');
+            followUpAdded = true;
+          }
+        }
+      } catch (adaptErr) {
+        console.warn('[Interview Controller] Failed to generate adaptive follow-up:', adaptErr.message);
+      }
+    }
+
+    // 4. Session Completion or Advance State
     if (currentIndex >= interview.totalQuestions - 1) {
       interview.status = 'completed';
       interview.sessionState = 'completed';
@@ -583,78 +733,9 @@ export const submitAnswer = async (req, res, next) => {
       interview.feedbackSummary = `Completed ${interview.category} (${interview.difficulty})${roleStr}${levelStr} mock interview with an overall score of ${interview.finalScore}%.`;
     } else {
       interview.sessionState = 'awaiting_answer';
-      // ADAPTIVE FOLLOW-UP: Dynamically generate tailored next question based on current answer & evaluation
-      const nextIndex = currentIndex + 1;
-      try {
-        const pastSessions = await Interview.find({ userId: req.user._id, category: interview.category })
-          .sort({ createdAt: -1 })
-          .limit(10)
-          .select('askedQuestionTexts askedQuestionIds')
-          .lean();
-
-        const userAskedNormalized = new Set(interview.askedQuestionTexts || []);
-        const userAskedIds = new Set(interview.askedQuestionIds || []);
-        // Ensure all questions currently in session are excluded to avoid duplication
-        if (Array.isArray(interview.questions)) {
-          interview.questions.forEach(q => {
-            if (q.normalizedText) userAskedNormalized.add(q.normalizedText);
-            if (q.questionId) userAskedIds.add(q.questionId);
-          });
-        }
-        if (currentQuestion?.normalizedText) userAskedNormalized.add(currentQuestion.normalizedText);
-        if (currentQuestion?.questionId) userAskedIds.add(currentQuestion.questionId);
-        for (const session of pastSessions) {
-          if (Array.isArray(session.askedQuestionTexts)) {
-            session.askedQuestionTexts.forEach(t => t && userAskedNormalized.add(t));
-          }
-          if (Array.isArray(session.askedQuestionIds)) {
-            session.askedQuestionIds.forEach(id => id && userAskedIds.add(id));
-          }
-        }
-        // Generate adaptive follow-up
-        const adaptiveQuestion = await generateAdaptiveFollowUpQuestion({
-          category: interview.category,
-          difficulty: interview.difficulty,
-          targetRole: interview.targetRole,
-          experienceLevel: interview.experienceLevel,
-          interviewMode: interview.interviewMode,
-          companyStyle: interview.companyStyle,
-          previousQuestion: currentQuestion,
-          userAnswer: currentQuestion.userAnswer,
-          evaluation,
-          excludeNormalized: Array.from(userAskedNormalized),
-          excludeIds: Array.from(userAskedIds),
-          conversationHistory: interview.conversationHistory || [],
-          parentQuestionId: currentQuestion.questionId,
-          language: interview.language || 'en-US'
-        });
-
-        if (adaptiveQuestion) {
-          const norm = adaptiveQuestion.normalizedText || normalizeQuestionText(adaptiveQuestion.questionText);
-          const isDuplicateInSession = interview.questions.some((q, idx) => {
-            if (idx === nextIndex) return false;
-            const qNorm = q.normalizedText || normalizeQuestionText(q.questionText);
-            return qNorm === norm || isTooSimilar(qNorm, norm, 0.65);
-          });
-
-          if (!isDuplicateInSession) {
-            adaptiveQuestion.order = nextIndex;
-            adaptiveQuestion.isAnswered = false;
-            adaptiveQuestion.parentQuestionId = currentQuestion.questionId;
-            interview.questions[nextIndex] = adaptiveQuestion;
-            if (adaptiveQuestion.questionId) {
-              interview.askedQuestionIds.push(adaptiveQuestion.questionId);
-            }
-            if (norm) {
-              interview.askedQuestionTexts.push(norm);
-            }
-            interview.markModified('questions');
-            interview.markModified('askedQuestionIds');
-            interview.markModified('askedQuestionTexts');
-          }
-        }
-      } catch (adaptErr) {
-        console.warn('[Interview Controller] Failed to generate adaptive follow-up, keeping baseline question:', adaptErr.message);
+      // If adaptive difficulty changed, update difficulty for next question if un-answered
+      if (interview.questions[currentIndex + 1] && !interview.questions[currentIndex + 1].isAnswered) {
+        interview.questions[currentIndex + 1].difficulty = interview.currentDifficulty;
       }
     }
 
@@ -664,6 +745,7 @@ export const submitAnswer = async (req, res, next) => {
     return res.status(200).json({
       status: 'success',
       evaluation,
+      interviewerReaction: reaction,
       serverTime: new Date().toISOString(),
       interview: sanitizeInterviewForCandidate(interview)
     });

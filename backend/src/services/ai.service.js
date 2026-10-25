@@ -1736,8 +1736,42 @@ Return a JSON object with this exact schema:
     }
   }
 
-  // Curated & Dynamic Fallback Engine for Adaptive Question Selection (Demo / Offline mode)
-  // 1. Try finding a question from MongoDB matching the strategy & category
+  // Fallback 1: Prioritize using the previous question's followUps[] or suggestedFollowUps[]
+  const availableFollowUps = [
+    ...(Array.isArray(previousQuestion?.suggestedFollowUps) ? previousQuestion.suggestedFollowUps : []),
+    ...(Array.isArray(previousQuestion?.followUps) ? previousQuestion.followUps : [])
+  ].filter(Boolean);
+
+  for (const followUpText of availableFollowUps) {
+    const norm = normalizeQuestionText(followUpText);
+    if (norm && !seenNormalized.has(norm)) {
+      return wrapAdaptiveResult({
+        questionId: `followup_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        questionText: followUpText.trim(),
+        normalizedText: norm,
+        category,
+        topic: prevTopic,
+        subtopic: 'Adaptive Follow-Up',
+        difficulty: targetDifficulty,
+        questionType: 'conceptual',
+        targetRoles: [targetRole],
+        interviewMode,
+        companyStyleLabel: companyStyle,
+        isAdaptiveFollowUp: true,
+        isFollowUp: true,
+        parentQuestionId: resolvedParentId,
+        followUpStrategy: strategy,
+        adaptiveReason: `Targeted follow-up on ${prevTopic}: probing technical rationale and edge cases.`,
+        referenceAnswer: `A thorough answer directly analyzes ${followUpText} by detailing internal mechanics, performance bounds, and production considerations in ${category}.`,
+        expectedKeyPoints: [
+          `Clear architectural and practical understanding of ${prevTopic}`,
+          `Evaluation of production trade-offs and edge-case behavior in ${category}`
+        ]
+      });
+    }
+  }
+
+  // Fallback 2: Dynamic Curated Engine from MongoDB matching strategy & category
   if (mongoose.connection && mongoose.connection.readyState === 1) {
     try {
       const escapedCategory = category.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1873,9 +1907,115 @@ Return a JSON object with this exact schema:
   });
 };
 
+/**
+ * Generate short human reaction between questions based on persona and company style
+ * Rules: Never reveals the ideal answer; tone depends on company style (Startup, FAANG, Enterprise)
+ */
+export const generateInterviewerReaction = ({
+  score = 5,
+  verdict = 'partially_correct',
+  companyStyle = 'General Tech',
+  language = 'en-US',
+  isFollowUp = false
+}) => {
+  const isHindi = Boolean(language && (language.startsWith('hi') || language.toLowerCase().includes('hindi')));
+  const style = (companyStyle || 'General Tech').toLowerCase();
+  const isStrong = score >= 7.5;
+  const isWeak = score < 5;
+
+  if (isHindi) {
+    if (isFollowUp) {
+      return isStrong
+        ? 'Bohot badiya! Aapne follow-up ko achhe se explain kiya. Chaliye agle question par chalte hain.'
+        : 'Theek hai, got it. Chaliye ab next question par move karte hain.';
+    }
+    if (isStrong) {
+      return 'Bohot achha! Aapka explanation kafi clear tha. Chaliye aage badhte hain.';
+    }
+    if (isWeak) {
+      return 'Theek hai, koi baat nahi. Chaliye agle question ko dekhte hain.';
+    }
+    return 'Theek hai, samajh gaya. Let\'s move on to the next question.';
+  }
+
+  // Startup Persona (Casual, fast-paced, pragmatic)
+  if (style.includes('startup')) {
+    if (isFollowUp) {
+      return isStrong
+        ? 'Great follow-up defense! Really like that angle. Let\'s keep the momentum going.'
+        : 'Got it. Makes sense for now. Let\'s pivot to the next problem.';
+    }
+    if (isStrong) {
+      const reactions = [
+        'Awesome, great breakdown! Let\'s keep moving.',
+        'Love the practical mindset there. Let\'s dive into the next one.',
+        'Spot on. Let\'s see how you tackle this next challenge.'
+      ];
+      return reactions[Math.floor(Math.random() * reactions.length)];
+    }
+    if (isWeak) {
+      const reactions = [
+        'No worries, let\'s pivot and tackle the next question.',
+        'Got it. Let\'s move on to the next one and see how you do there.'
+      ];
+      return reactions[Math.floor(Math.random() * reactions.length)];
+    }
+    return 'Okay, got it. Let\'s move on.';
+  }
+
+  // FAANG Persona (Rigorous, analytical, calm, objective)
+  if (style.includes('faang') || style.includes('big tech') || style.includes('maang')) {
+    if (isFollowUp) {
+      return isStrong
+        ? 'Understood. That addresses the edge case constraints. Let us proceed.'
+        : 'Acknowledged. Let us move forward to the next problem in the sequence.';
+    }
+    if (isStrong) {
+      const reactions = [
+        'Understood. That covers the primary operational characteristics. Moving on.',
+        'Clear explanation. Let us examine the next problem scenario.',
+        'Noted. Your rationale addresses the key constraints. Moving forward.'
+      ];
+      return reactions[Math.floor(Math.random() * reactions.length)];
+    }
+    if (isWeak) {
+      const reactions = [
+        'Understood. Let us transition to the next topic area.',
+        'Acknowledged. Moving on to the next evaluation question.'
+      ];
+      return reactions[Math.floor(Math.random() * reactions.length)];
+    }
+    return 'Understood. Let us proceed to the next question.';
+  }
+
+  // Enterprise / General Tech Persona (Professional, structured, courteous)
+  if (isFollowUp) {
+    return isStrong
+      ? 'Thank you for clarifying that point thoroughly. Let us proceed.'
+      : 'Thank you for your answer. Let us now move on to the next topic.';
+  }
+  if (isStrong) {
+    const reactions = [
+      'Thank you, that was a very thorough and structured answer. Let\'s proceed.',
+      'Well articulated. Let us move forward to the next question in this round.',
+      'Thank you. That aligns well with standard engineering practices. Moving on.'
+    ];
+    return reactions[Math.floor(Math.random() * reactions.length)];
+  }
+  if (isWeak) {
+    const reactions = [
+      'Thank you. Let us move on to our next area of discussion.',
+      'Understood. Let us proceed to the next question in the evaluation.'
+    ];
+    return reactions[Math.floor(Math.random() * reactions.length)];
+  }
+  return 'Okay, got it. Let\'s move on.';
+};
+
 export default {
   generateQuestions,
   generateAdaptiveFollowUpQuestion,
+  generateInterviewerReaction,
   evaluateAnswer,
   retrieveCuratedQuestions,
   generateCategoryFallbackQuestions,

@@ -129,6 +129,15 @@ const questionSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    isFollowUp: {
+      type: Boolean,
+      default: false
+    },
+    interviewerReaction: {
+      type: String,
+      default: '',
+      trim: true
+    },
     adaptiveReason: {
       type: String,
       default: '',
@@ -326,6 +335,33 @@ const interviewSchema = new mongoose.Schema(
       enum: ['Easy', 'Medium', 'Hard'],
       default: 'Medium'
     },
+    adaptiveMode: {
+      type: Boolean,
+      default: true
+    },
+    focusWeakAreas: {
+      type: Boolean,
+      default: false
+    },
+    currentDifficulty: {
+      type: String,
+      enum: ['Easy', 'Medium', 'Hard'],
+      default: 'Medium'
+    },
+    consecutiveStrongAnswers: {
+      type: Number,
+      default: 0
+    },
+    consecutiveWeakAnswers: {
+      type: Number,
+      default: 0
+    },
+    interviewerReactions: [{
+      questionIndex: { type: Number },
+      reactionText: { type: String, default: '' },
+      tone: { type: String, default: 'General Tech' },
+      timestamp: { type: Date, default: Date.now }
+    }],
     topic: {
       type: String,
       default: '',

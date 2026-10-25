@@ -74,7 +74,8 @@ const Profile = () => {
     targetRole: 'Software Engineer',
     preferredDifficulty: 'Medium',
     preferredCategories: ['Java', 'DSA', 'React', 'SQL/DBMS'],
-    preferredQuestionCount: 5
+    preferredQuestionCount: 5,
+    resumeSkillsText: ''
   });
 
   // Populate form with current user values
@@ -90,7 +91,8 @@ const Profile = () => {
       preferredCategories: u.preferences?.preferredCategories?.length > 0 
         ? u.preferences.preferredCategories 
         : ['Java', 'DSA', 'React'],
-      preferredQuestionCount: u.preferences?.preferredQuestionCount || 5
+      preferredQuestionCount: u.preferences?.preferredQuestionCount || 5,
+      resumeSkillsText: u.resumeSkillsText || ''
     });
   };
 
@@ -162,6 +164,7 @@ const Profile = () => {
         phoneNumber: formData.phoneNumber.trim(),
         college: formData.college.trim(),
         graduationYear: formData.graduationYear.trim(),
+        resumeSkillsText: formData.resumeSkillsText ? formData.resumeSkillsText.trim() : '',
         preferences: {
           targetRole: formData.targetRole,
           preferredDifficulty: formData.preferredDifficulty,
@@ -527,6 +530,47 @@ const Profile = () => {
               </div>
             </div>
 
+            {/* Section E: Resume Skills & Projects Context */}
+            <div style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '14px', padding: '24px', boxShadow: 'var(--shadow-card)', transition: 'background-color var(--transition-fast), border-color var(--transition-fast)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Sparkles size={18} color="#818cf8" /> Resume Skills &amp; Projects (AI Interview Context)
+                </h2>
+                <Button variant="ghost" size="sm" onClick={() => { setIsEditing(true); setSearchParams({ edit: 'true' }); }}>
+                  <Edit3 size={14} /> Edit Context
+                </Button>
+              </div>
+              <p style={{ margin: '0 0 14px 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Paste skills, frameworks, and project descriptions from your resume. The AI interviewer uses this as interview context to personalize questions and follow-ups. You can edit or delete this anytime.
+              </p>
+              {user?.resumeSkillsText ? (
+                <pre style={{
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '10px',
+                  padding: '16px',
+                  fontSize: '0.88rem',
+                  color: 'var(--text-primary)',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily: 'inherit',
+                  lineHeight: 1.6,
+                  margin: 0
+                }}>
+                  {user.resumeSkillsText}
+                </pre>
+              ) : (
+                <div style={{ padding: '20px', borderRadius: '10px', backgroundColor: 'var(--bg-card-subtle)', border: '1px dashed var(--border-subtle)', textAlign: 'center' }}>
+                  <p style={{ margin: '0 0 10px 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+                    No resume context added yet. Add your tech stack and project highlights to give the AI interviewer tailored context.
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => { setIsEditing(true); setSearchParams({ edit: 'true' }); }}>
+                    Add Resume Context
+                  </Button>
+                </div>
+              )}
+            </div>
+
           </div>
         ) : (
           /* ========================================================
@@ -792,6 +836,37 @@ const Profile = () => {
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Edit Section: Resume Skills & Projects */}
+              <div style={{ marginTop: '20px' }}>
+                <label htmlFor="resumeSkillsInput" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  <Sparkles size={15} color="#818cf8" /> Resume Skills &amp; Key Projects (AI Context):
+                </label>
+                <p style={{ margin: '0 0 8px 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Paste your resume skills, tech stack, and key projects as plain text. The AI interviewer uses this solely as interview context to ask relevant architectural and trade-off questions.
+                </p>
+                <textarea
+                  id="resumeSkillsInput"
+                  rows={6}
+                  value={formData.resumeSkillsText}
+                  onChange={e => setFormData({ ...formData, resumeSkillsText: e.target.value })}
+                  placeholder="e.g. Languages: Java, Python, TypeScript. Frameworks: Spring Boot, React, Node.js, Express. Projects: Built an event-driven payment processing pipeline using Kafka, Redis caching, and PostgreSQL with 99.99% uptime..."
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.88rem',
+                    lineHeight: 1.5,
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                />
               </div>
             </div>
 

@@ -26,7 +26,12 @@ import {
   Code,
   ShieldCheck,
   Smartphone,
-  Activity
+  Activity,
+  Brain,
+  Zap,
+  Lock,
+  Target,
+  Mic
 } from 'lucide-react';
 import Button from '../components/ui/Button';
 import UserMenu from '../components/UserMenu';
@@ -822,9 +827,29 @@ const InterviewSetup = () => {
   const [availableTopics, setAvailableTopics] = useState(DEFAULT_TOPICS['Java'] || []);
   const [selectedTopic, setSelectedTopic] = useState(qTopic || '');
   const [customTopic, setCustomTopic] = useState('');
+
+  // AI Interviewer Intelligence Toggles
+  const [adaptiveMode, setAdaptiveMode] = useState(true);
+  const [focusWeakAreas, setFocusWeakAreas] = useState(false);
+  const [voiceInterview, setVoiceInterview] = useState(false);
+  const [completedSessionsCount, setCompletedSessionsCount] = useState(0);
   
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Fetch past session count to determine whether enough data exists for weak areas
+  useEffect(() => {
+    let isMounted = true;
+    api.get('/interviews?limit=10')
+      .then(res => {
+        if (!isMounted) return;
+        const interviews = res.data?.interviews || [];
+        const completed = interviews.filter(i => i.status === 'completed').length;
+        setCompletedSessionsCount(completed);
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, []);
 
   // Synchronize category and topic if searchParams change
   useEffect(() => {
@@ -973,9 +998,12 @@ const InterviewSetup = () => {
         topic: effectiveTopic,
         targetRole,
         experienceLevel,
-        interviewMode,
+        interviewMode: voiceInterview ? 'voice' : interviewMode,
         companyStyle,
-        language: interviewLanguage
+        language: interviewLanguage,
+        adaptiveMode,
+        focusWeakAreas: completedSessionsCount >= 2 ? focusWeakAreas : false,
+        voiceInterview
       });
 
       if (response.data && response.data.status === 'success' && response.data.interview) {
@@ -1688,6 +1716,133 @@ const InterviewSetup = () => {
 
             </div>
 
+          </div>
+
+          {/* Section 7: AI Interviewer Persona & Intelligence */}
+          <div style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '14px', padding: '24px', boxShadow: 'var(--shadow-card)', marginBottom: '24px', transition: 'background-color var(--transition-fast), border-color var(--transition-fast)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
+              <Brain size={18} color="#818cf8" /> 7. AI Interviewer Persona &amp; Intelligence
+            </label>
+            <p style={{ margin: '0 0 16px 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+              Configure adaptive difficulty progression, weak-topic targeting, and conversational voice interaction.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+              {/* Toggle 1: Adaptive Mode */}
+              <div 
+                onClick={() => setAdaptiveMode(prev => !prev)}
+                style={{
+                  padding: '16px',
+                  borderRadius: '10px',
+                  border: adaptiveMode ? '2px solid #818cf8' : '1px solid var(--border-subtle)',
+                  backgroundColor: adaptiveMode ? 'rgba(129, 140, 248, 0.1)' : 'var(--bg-card-subtle)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '10px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Zap size={16} color="#818cf8" />
+                      <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                        Adaptive Mode (Recommended)
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: adaptiveMode ? '#818cf8' : 'var(--bg-subtle)', color: adaptiveMode ? '#ffffff' : 'var(--text-muted)' }}>
+                      {adaptiveMode ? 'ENABLED' : 'OFF'}
+                    </span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                    Tracks running accuracy. 2 strong answers in a row trigger slightly harder questions. Probes partial or unclear answers with 1 smart follow-up.
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggle 2: Focus on Weak Areas */}
+              <div 
+                onClick={() => {
+                  if (completedSessionsCount >= 2) {
+                    setFocusWeakAreas(prev => !prev);
+                  }
+                }}
+                style={{
+                  padding: '16px',
+                  borderRadius: '10px',
+                  border: (completedSessionsCount >= 2 && focusWeakAreas) ? '2px solid var(--warning)' : '1px solid var(--border-subtle)',
+                  backgroundColor: (completedSessionsCount >= 2 && focusWeakAreas) ? 'rgba(234, 179, 8, 0.12)' : 'var(--bg-card-subtle)',
+                  cursor: completedSessionsCount >= 2 ? 'pointer' : 'not-allowed',
+                  opacity: completedSessionsCount >= 2 ? 1 : 0.65,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '10px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {completedSessionsCount < 2 ? <Lock size={15} color="var(--text-muted)" /> : <Target size={16} color="var(--warning-text)" />}
+                      <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                        Focus on My Weak Areas
+                      </span>
+                    </div>
+                    {completedSessionsCount >= 2 ? (
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: focusWeakAreas ? 'var(--warning)' : 'var(--bg-subtle)', color: focusWeakAreas ? '#000' : 'var(--text-muted)' }}>
+                        {focusWeakAreas ? 'ACTIVE' : 'OFF'}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', backgroundColor: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: '4px' }}>
+                        {completedSessionsCount}/2 Sessions
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                    {completedSessionsCount >= 2 
+                      ? 'Prioritizes categories and topics where your past scores fell below 65%.'
+                      : 'Complete at least 2 sessions to unlock weak-area targeting based on your skill gap analysis.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggle 3: Realistic Voice Interview */}
+              <div 
+                onClick={() => setVoiceInterview(prev => !prev)}
+                style={{
+                  padding: '16px',
+                  borderRadius: '10px',
+                  border: voiceInterview ? '2px solid #22c55e' : '1px solid var(--border-subtle)',
+                  backgroundColor: voiceInterview ? 'rgba(34, 197, 94, 0.1)' : 'var(--bg-card-subtle)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '10px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Mic size={16} color="#22c55e" />
+                      <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                        Realistic Voice Interview
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: voiceInterview ? '#22c55e' : 'var(--bg-subtle)', color: voiceInterview ? '#ffffff' : 'var(--text-muted)' }}>
+                      {voiceInterview ? 'VOICE ON' : 'OPTIONAL'}
+                    </span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                    Interviewer speaks questions aloud with natural pacing. Your mic opens automatically with live speech recognition &amp; silence detection.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Sticky Bottom Bar with Real-time Summary & Start Button */}

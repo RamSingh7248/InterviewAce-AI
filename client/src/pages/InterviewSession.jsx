@@ -28,7 +28,9 @@ import {
   RefreshCw,
   Keyboard,
   RotateCcw,
-  Trash2
+  Trash2,
+  Lock,
+  Sparkles
 } from 'lucide-react';
 import Button from '../components/ui/Button';
 import AIAvatarTile from '../components/interview/AIAvatarTile';
@@ -1296,21 +1298,22 @@ const InterviewSession = () => {
       <main style={{ flex: 1, padding: '20px 24px 100px 24px', maxWidth: '1280px', width: '100%', margin: '0 auto' }}>
         
         {/* Adaptive Context Banner (if active follow-up) */}
-        {currentQ?.isAdaptiveFollowUp && (
+        {(currentQ?.isFollowUp || currentQ?.isAdaptiveFollowUp) && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            backgroundColor: 'rgba(56, 189, 248, 0.1)',
-            border: '1px solid rgba(56, 189, 248, 0.25)',
+            gap: '10px',
+            backgroundColor: 'rgba(168, 85, 247, 0.12)',
+            border: '1px solid rgba(168, 85, 247, 0.35)',
             borderRadius: '10px',
-            padding: '8px 16px',
+            padding: '10px 18px',
             marginBottom: '16px',
-            fontSize: '0.82rem',
-            color: '#38bdf8'
+            fontSize: '0.85rem',
+            color: '#c084fc',
+            boxShadow: '0 2px 10px rgba(168, 85, 247, 0.08)'
           }}>
-            <Brain size={16} />
-            <span><strong>Adaptive Reason:</strong> {currentQ.adaptiveReason || 'Calibrated directly to your previous technical explanation.'}</span>
+            <Sparkles size={18} color="#c084fc" />
+            <span><strong>🎯 Smart Follow-Up Probe:</strong> {currentQ.adaptiveReason || 'Targeted deep-dive based directly on your last answer. Probing trade-offs, internal mechanisms, or edge cases.'}</span>
           </div>
         )}
 
@@ -1721,6 +1724,32 @@ const InterviewSession = () => {
             boxShadow: 'var(--shadow-card)',
             animation: 'fadeIn 0.3s ease-in'
           }}>
+            {/* Interviewer Persona Human Reaction */}
+            {(currentQ?.interviewerReaction || evaluation?.interviewerReaction) && (
+              <div style={{
+                backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                borderRadius: '12px',
+                padding: '14px 18px',
+                marginBottom: '18px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'rgba(99, 102, 241, 0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Sparkles size={16} color="#818cf8" />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Interviewer ({interview?.companyStyle || 'Company Practice'})
+                  </div>
+                  <div style={{ fontSize: '0.94rem', color: 'var(--text-primary)', fontStyle: 'italic', marginTop: '2px' }}>
+                    "{currentQ?.interviewerReaction || evaluation?.interviewerReaction}"
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '20px', marginBottom: '20px' }}>
               <div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--success-text)', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
@@ -1777,22 +1806,11 @@ const InterviewSession = () => {
               </div>
             )}
 
-            {/* Model Answer */}
-            {evaluation.idealAnswer && (
-              <div style={{ backgroundColor: 'var(--bg-card-subtle)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning-text)', fontSize: '0.88rem', fontWeight: 600 }}>
-                    <Lightbulb size={16} /> Model Answer & Key Mechanics
-                  </div>
-                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontStyle: 'italic', backgroundColor: 'var(--bg-surface)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
-                    *AI Reference Example (Illustrative sample)
-                  </span>
-                </div>
-                <p style={{ margin: 0, fontSize: '0.87rem', color: 'var(--text-primary)', lineHeight: 1.65 }}>
-                  {evaluation.idealAnswer}
-                </p>
-              </div>
-            )}
+            {/* Model Answer Guard during active session */}
+            <div style={{ backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              <Lock size={14} />
+              <span>Model answers and comprehensive reference solutions are withheld during the live interview and will be revealed on the final assessment results screen.</span>
+            </div>
 
             {/* Actionable Suggestions */}
             {Array.isArray(evaluation.suggestions) && evaluation.suggestions.length > 0 && (

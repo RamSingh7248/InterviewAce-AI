@@ -148,8 +148,14 @@ export const updateProfile = async (req, res, next) => {
       phoneNumber,
       college,
       graduationYear,
+      resumeSkillsText,
       preferences = {}
     } = req.body;
+
+    // Optional resume skills / project text for interview personalization
+    if (resumeSkillsText !== undefined) {
+      user.resumeSkillsText = String(resumeSkillsText).trim().slice(0, 10000);
+    }
 
     // Validate and update name if provided
     if (name !== undefined) {

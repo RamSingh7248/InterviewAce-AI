@@ -45,6 +45,12 @@ const userSchema = new mongoose.Schema(
       enum: ['active', 'inactive', 'suspended'],
       default: 'active'
     },
+    resumeSkillsText: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: [10000, 'Resume text cannot exceed 10,000 characters']
+    },
     preferences: {
       targetRole: {
         type: String,

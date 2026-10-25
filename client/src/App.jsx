@@ -11,6 +11,7 @@ import InterviewSetup from './pages/InterviewSetup';
 import InterviewSession from './pages/InterviewSession';
 import InterviewResults from './pages/InterviewResults';
 import SkillGapAnalyzer from './pages/SkillGapAnalyzer';
+import SessionHistory from './pages/SessionHistory';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
 
@@ -116,6 +117,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <SkillGapAnalyzer />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/history" 
+            element={
+              <ProtectedRoute>
+                <SessionHistory />
               </ProtectedRoute>
             } 
           />

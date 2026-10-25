@@ -155,6 +155,11 @@ const questionSchema = new mongoose.Schema(
       default: 0
     },
     evaluation: {
+      overallScore: {
+        type: Number,
+        min: 0,
+        max: 10
+      },
       score: {
         type: Number,
         min: 0,
@@ -165,9 +170,16 @@ const questionSchema = new mongoose.Schema(
         min: 0,
         max: 100
       },
+      scores: {
+        technicalAccuracy: { type: Number, default: 0 },
+        completeness: { type: Number, default: 0 },
+        depth: { type: Number, default: 0 },
+        clarity: { type: Number, default: 0 },
+        communication: { type: Number, default: 0 }
+      },
       evaluationStatus: {
         type: String,
-        enum: ['evaluated', 'empty', 'skipped', 'too_short', 'failed'],
+        enum: ['pending', 'evaluating', 'evaluated', 'empty', 'skipped', 'too_short', 'failed'],
         default: 'evaluated'
       },
       verdict: {
@@ -187,10 +199,46 @@ const questionSchema = new mongoose.Schema(
         type: String,
         trim: true
       },
+      keyPointsCovered: [{
+        type: String,
+        trim: true
+      }],
+      keyPointsMissed: [{
+        type: String,
+        trim: true
+      }],
       strengths: [{
         type: String,
         trim: true
       }],
+      mistakes: [{
+        type: String,
+        trim: true
+      }],
+      improvements: [{
+        type: String,
+        trim: true
+      }],
+      betterAnswer: {
+        type: String,
+        trim: true,
+        default: ''
+      },
+      confidence: {
+        type: Number,
+        min: 0,
+        max: 1,
+        default: 0.85
+      },
+      evaluatorLabel: {
+        type: String,
+        default: 'AI Evaluation',
+        trim: true
+      },
+      isFallback: {
+        type: Boolean,
+        default: false
+      },
       missingConcepts: [{
         type: String,
         trim: true
@@ -392,6 +440,21 @@ const interviewSchema = new mongoose.Schema(
       type: String,
       default: ''
     },
+    dimensionScores: {
+      technicalAccuracy: { type: Number, default: 0 },
+      completeness: { type: Number, default: 0 },
+      depth: { type: Number, default: 0 },
+      clarity: { type: Number, default: 0 },
+      communication: { type: Number, default: 0 }
+    },
+    topStrengths: [{
+      type: String,
+      trim: true
+    }],
+    topWeaknesses: [{
+      type: String,
+      trim: true
+    }],
     completedAt: {
       type: Date
     }

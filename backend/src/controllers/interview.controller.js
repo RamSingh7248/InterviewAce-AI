@@ -4,6 +4,7 @@ import { generateQuestions, evaluateAnswer, generateAdaptiveFollowUpQuestion, is
 import { executeCode as executeCodeService } from '../services/codeExecution.service.js';
 import { INTERVIEW_CATALOG, normalizeCategory } from '../config/interviewCatalog.js';
 import { normalizeQuestionText } from '../utils/textNormalize.js';
+import { evaluationQueue } from '../services/evaluationQueue.js';
 
 const SUPPORTED_CATEGORIES = INTERVIEW_CATALOG.categories.map(c => c.id);
 
@@ -451,34 +452,8 @@ export const submitAnswer = async (req, res, next) => {
       });
     }
 
-    // Prevent concurrent duplicate evaluations for the same session
-    if (interview.isEvaluating || interview.sessionState === 'evaluating') {
-      return res.status(409).json({
-        status: 'error',
-        message: 'An evaluation is already in progress for this session. Please wait.'
-      });
-    }
-
-    const currentIndex = interview.currentQuestionIndex;
-    const currentQuestion = interview.questions[currentIndex];
-
-    if (!currentQuestion) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'No active question found at this index.'
-      });
-    }
-
-    // Question ID sanity check if provided by client
-    if (questionId && currentQuestion.questionId && currentQuestion.questionId !== questionId) {
-      return res.status(409).json({
-        status: 'error',
-        message: 'The submitted question does not match the active question.'
-      });
-    }
-
-    // Idempotency: if already answered and evaluated, return current evaluation without duplicating
-    if (currentQuestion.isAnswered || (currentQuestion.evaluation && currentQuestion.evaluation.score !== undefined)) {
+    // Prevent duplicate evaluation on the exact same question if already answered
+    if (currentQuestion.isAnswered && currentQuestion.evaluation && currentQuestion.evaluation.score !== undefined && currentQuestion.evaluation.evaluationStatus === 'evaluated') {
       return res.status(200).json({
         status: 'success',
         alreadyEvaluated: true,
@@ -490,49 +465,53 @@ export const submitAnswer = async (req, res, next) => {
 
     // Save candidate answer first so answer is never lost even if evaluation fails
     currentQuestion.userAnswer = answer ? answer.trim() : '';
-    interview.isEvaluating = true;
-    interview.sessionState = 'evaluating';
-    await interview.save();
 
-    let evaluation = null;
     const qStartTime = currentQuestion.startedAt || interview.currentQuestionStartedAt || interview.startedAt || new Date();
     const timeSpentSeconds = Math.max(1, Math.round((Date.now() - new Date(qStartTime).getTime()) / 1000));
 
+    // Run fast evaluation immediately so candidate receives instant baseline feedback and is not blocked
+    let evaluation = null;
+    const evalPayload = {
+      question: currentQuestion,
+      questionText: currentQuestion.questionText,
+      expectedKeyPoints: currentQuestion.expectedKeyPoints,
+      referenceAnswer: currentQuestion.referenceAnswer,
+      userAnswer: currentQuestion.userAnswer,
+      category: interview.category,
+      topic: currentQuestion.topic || interview.topic,
+      subtopic: currentQuestion.subtopic,
+      difficulty: currentQuestion.difficulty || interview.difficulty,
+      targetRole: interview.targetRole || 'Software Engineer',
+      experienceLevel: interview.experienceLevel || 'mid',
+      interviewMode: interview.interviewMode || 'mixed',
+      companyStyle: interview.companyStyle || 'General Tech',
+      conversationHistory: interview.conversationHistory || [],
+      language: interview.language || 'en-US',
+      questionType: currentQuestion.questionType,
+      stepByStepExplanation: currentQuestion.stepByStepExplanation,
+      practicalExample: currentQuestion.practicalExample,
+      commonMistakes: currentQuestion.commonMistakes,
+      suggestedFollowUps: currentQuestion.suggestedFollowUps
+    };
+
     try {
-      evaluation = await evaluateAnswer({
-        question: currentQuestion,
-        questionText: currentQuestion.questionText,
-        expectedKeyPoints: currentQuestion.expectedKeyPoints,
-        referenceAnswer: currentQuestion.referenceAnswer,
-        userAnswer: currentQuestion.userAnswer,
-        category: interview.category,
-        topic: currentQuestion.topic || interview.topic,
-        subtopic: currentQuestion.subtopic,
-        difficulty: currentQuestion.difficulty || interview.difficulty,
-        targetRole: interview.targetRole || 'Software Engineer',
-        experienceLevel: interview.experienceLevel || 'mid',
-        interviewMode: interview.interviewMode || 'mixed',
-        companyStyle: interview.companyStyle || 'General Tech',
-        conversationHistory: interview.conversationHistory || [],
-        language: interview.language || 'en-US',
-        questionType: currentQuestion.questionType,
-        stepByStepExplanation: currentQuestion.stepByStepExplanation,
-        practicalExample: currentQuestion.practicalExample,
-        commonMistakes: currentQuestion.commonMistakes,
-        suggestedFollowUps: currentQuestion.suggestedFollowUps
-      });
+      evaluation = await evaluateAnswer(evalPayload, { forceHeuristic: false });
     } catch (evalErr) {
-      interview.isEvaluating = false;
-      interview.sessionState = 'failed';
-      await interview.save();
-      return res.status(500).json({
-        status: 'error',
-        canRetry: true,
-        message: `Evaluation encountered an error: ${evalErr.message}. Your answer was saved. You can retry safely.`,
-        interview: sanitizeInterviewForCandidate(interview)
+      console.warn('[Interview Controller] Initial evaluation failed, falling back to heuristic:', evalErr.message);
+      evaluation = await evaluateAnswer(evalPayload, { forceHeuristic: true });
+    }
+
+    // If Gemini was unavailable or skipped in synchronous pass, enqueue for background refinement
+    const isAiEvaluated = evaluation && !evaluation.isFallback && evaluation.evaluatorLabel !== 'Basic evaluation (AI unavailable)';
+    evaluation.evaluationStatus = isAiEvaluated ? 'evaluated' : 'evaluating';
+
+    if (!isAiEvaluated && currentQuestion.userAnswer && currentQuestion.userAnswer !== '[Skipped]') {
+      evaluationQueue.enqueue({
+        interviewId: interview._id,
+        questionIndex: currentIndex,
+        questionId: currentQuestion.questionId,
+        evalArgs: evalPayload
       });
-    } finally {
-      interview.isEvaluating = false;
     }
 
     // Save candidate answer, evaluation, and timestamps
@@ -571,6 +550,31 @@ export const submitAnswer = async (req, res, next) => {
           return acc + s100;
         }, 0);
         interview.finalScore = Math.round(totalScore100 / interview.totalQuestions);
+
+        // Aggregate dimensional scores
+        const avgDim = (key) => {
+          const vals = evaluatedQuestions.map(item => item.evaluation?.scores?.[key]).filter(v => typeof v === 'number');
+          if (vals.length === 0) return 0;
+          return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+        };
+
+        interview.dimensionScores = {
+          technicalAccuracy: avgDim('technicalAccuracy'),
+          completeness: avgDim('completeness'),
+          depth: avgDim('depth'),
+          clarity: avgDim('clarity'),
+          communication: avgDim('communication')
+        };
+
+        const allStrengths = [];
+        const allWeaknesses = [];
+        evaluatedQuestions.forEach(item => {
+          if (Array.isArray(item.evaluation?.strengths)) allStrengths.push(...item.evaluation.strengths);
+          if (Array.isArray(item.evaluation?.improvements)) allWeaknesses.push(...item.evaluation.improvements);
+          if (Array.isArray(item.evaluation?.keyPointsMissed)) allWeaknesses.push(...item.evaluation.keyPointsMissed);
+        });
+        interview.topStrengths = Array.from(new Set(allStrengths)).slice(0, 5);
+        interview.topWeaknesses = Array.from(new Set(allWeaknesses)).slice(0, 5);
       } else {
         interview.finalScore = 0;
       }
@@ -806,16 +810,29 @@ export const retryEvaluation = async (req, res, next) => {
 export const getUserInterviews = async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
     const skip = (page - 1) * limit;
+    const { category, status, search } = req.query;
+
+    const filter = { userId: req.user._id };
+    if (category) filter.category = category;
+    if (status) filter.status = status;
+    if (search && search.trim()) {
+      filter.$or = [
+        { category: { $regex: search.trim(), $options: 'i' } },
+        { targetRole: { $regex: search.trim(), $options: 'i' } },
+        { topic: { $regex: search.trim(), $options: 'i' } }
+      ];
+    }
 
     const [interviews, total] = await Promise.all([
-      Interview.find({ userId: req.user._id })
+      Interview.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
+        .select('category topic difficulty targetRole experienceLevel status finalScore totalQuestions questions.isAnswered questions.evaluation.overallScore questions.evaluation.evaluatorLabel dimensionScores topStrengths topWeaknesses createdAt completedAt')
         .lean(),
-      Interview.countDocuments({ userId: req.user._id })
+      Interview.countDocuments(filter)
     ]);
 
     return res.status(200).json({
@@ -827,6 +844,56 @@ export const getUserInterviews = async (req, res, next) => {
         total,
         pages: Math.ceil(total / limit)
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Check asynchronous evaluation status for an interview session
+ * GET /api/interviews/:id/evaluation-status
+ */
+export const getEvaluationStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ status: 'error', message: 'Invalid session ID' });
+    }
+
+    const interview = await Interview.findById(id)
+      .select('userId status finalScore dimensionScores topStrengths topWeaknesses questions.evaluation questions.isAnswered isEvaluating')
+      .lean();
+
+    if (!interview) {
+      return res.status(404).json({ status: 'error', message: 'Interview session not found' });
+    }
+
+    if (interview.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ status: 'error', message: 'Unauthorized to view this interview.' });
+    }
+
+    const hasPendingInQueue = evaluationQueue.hasPending(id);
+    const pendingQuestions = (interview.questions || []).filter(
+      q => q.isAnswered && q.evaluation?.evaluationStatus && ['pending', 'evaluating'].includes(q.evaluation.evaluationStatus)
+    );
+    const isPending = hasPendingInQueue || pendingQuestions.length > 0;
+    const evaluatedCount = (interview.questions || []).filter(
+      q => q.evaluation?.evaluationStatus === 'evaluated' || (q.isAnswered && !isPending)
+    ).length;
+    const totalAnswered = (interview.questions || []).filter(q => q.isAnswered).length;
+
+    return res.status(200).json({
+      status: 'success',
+      isPending,
+      pendingCount: evaluationQueue.getPendingCount(id) || pendingQuestions.length,
+      evaluatedCount,
+      totalAnswered,
+      isCompleted: interview.status === 'completed',
+      finalScore: interview.finalScore,
+      dimensionScores: interview.dimensionScores,
+      topStrengths: interview.topStrengths,
+      topWeaknesses: interview.topWeaknesses
     });
   } catch (error) {
     next(error);

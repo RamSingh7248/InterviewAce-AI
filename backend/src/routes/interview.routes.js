@@ -7,6 +7,7 @@ import {
   nextQuestion,
   retryEvaluation,
   getUserInterviews,
+  getEvaluationStatus,
   getDashboardStats,
   updateInterviewSettings,
   addMorePracticeQuestions,
@@ -24,6 +25,7 @@ router.post('/start', createInterview);
 router.get('/stats', getDashboardStats);
 router.get('/history', getUserInterviews);
 router.get('/', getUserInterviews);
+router.get('/:id/evaluation-status', getEvaluationStatus);
 router.get('/:id', getInterview);
 router.patch('/:id/settings', updateInterviewSettings);
 router.post('/:id/answer', submitAnswer);

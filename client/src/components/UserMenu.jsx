@@ -11,7 +11,8 @@ import {
   Moon, 
   Monitor,
   Check,
-  Target
+  Target,
+  History
 } from 'lucide-react';
 
 export const UserMenu = () => {
@@ -235,6 +236,28 @@ export const UserMenu = () => {
 
           {/* Navigation Links */}
           <div style={{ padding: '4px' }}>
+            <Link
+              to="/history"
+              onClick={() => setIsOpen(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '9px',
+                padding: '8px 10px',
+                borderRadius: 'var(--radius-sm, 6px)',
+                color: 'var(--text-primary)',
+                textDecoration: 'none',
+                fontSize: '0.84rem',
+                fontWeight: 500,
+                transition: 'background var(--transition-fast, 0.15s ease)'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-subtle)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <History size={15} style={{ color: 'var(--primary-text)' }} />
+              <span>Session History</span>
+            </Link>
+
             <Link
               to="/skills"
               onClick={() => setIsOpen(false)}

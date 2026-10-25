@@ -149,6 +149,7 @@ const InterviewResults = () => {
   const [expandedQSet, setExpandedQSet] = useState(new Set([0])); // set of expanded question indices
   const [addingQuestions, setAddingQuestions] = useState(false);
   const [continuationError, setContinuationError] = useState('');
+  const [evalProgress, setEvalProgress] = useState({ isPending: false, evaluatedCount: 0, totalAnswered: 0 });
 
   const toggleExpand = (idx) => {
     setExpandedQSet(prev => {
@@ -169,11 +170,53 @@ const InterviewResults = () => {
   };
 
   useEffect(() => {
+    let intervalId = null;
+
     const fetchResults = async () => {
       try {
         const response = await api.get(`/interviews/${id}`);
         if (response.data && response.data.status === 'success') {
-          setInterview(response.data.interview);
+          const doc = response.data.interview;
+          setInterview(doc);
+
+          // Check if any answers have pending background AI evaluations
+          const hasPending = (doc.questions || []).some(
+            q => q.isAnswered && q.evaluation?.evaluationStatus && ['pending', 'evaluating'].includes(q.evaluation.evaluationStatus)
+          ) || doc.isEvaluating;
+
+          if (hasPending) {
+            setEvalProgress({
+              isPending: true,
+              evaluatedCount: (doc.questions || []).filter(q => q.evaluation?.evaluationStatus === 'evaluated').length,
+              totalAnswered: (doc.questions || []).filter(q => q.isAnswered).length
+            });
+
+            // Poll evaluation status every 2.5s until complete
+            intervalId = setInterval(async () => {
+              try {
+                const statusRes = await api.get(`/interviews/${id}/evaluation-status`);
+                if (statusRes.data && statusRes.data.status === 'success') {
+                  const s = statusRes.data;
+                  setEvalProgress({
+                    isPending: s.isPending,
+                    evaluatedCount: s.evaluatedCount,
+                    totalAnswered: s.totalAnswered
+                  });
+
+                  if (!s.isPending) {
+                    clearInterval(intervalId);
+                    // Re-fetch interview with refined evaluations
+                    const refreshed = await api.get(`/interviews/${id}`);
+                    if (refreshed.data?.interview) {
+                      setInterview(refreshed.data.interview);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn('[InterviewResults] Error checking evaluation status:', e.message);
+              }
+            }, 2500);
+          }
         }
       } catch (err) {
         setError(err.response?.data?.message || 'Failed to load interview results.');
@@ -181,12 +224,16 @@ const InterviewResults = () => {
         setLoading(false);
       }
     };
+
     fetchResults();
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [id]);
 
   const handleContinuePractice = async () => {
     setAddingQuestions(true);
-    setContinuationMessage('');
     setContinuationError('');
     try {
       const response = await api.post(`/interviews/${id}/more-questions`, { count: 3 });
@@ -241,6 +288,51 @@ const InterviewResults = () => {
   const avgScore = evaluated.length > 0 ? Math.round((evaluated.reduce((a, q) => a + q.evaluation.score, 0) / evaluated.length) * 10) / 10 : 0;
   const highScores = evaluated.filter(q => q.evaluation.score >= 7).length;
   const lowScores = evaluated.filter(q => q.evaluation.score < 5).length;
+
+  // 5-Dimension Competency Scores (0-10)
+  const rawDims = interview.dimensionScores || {};
+  const dimTechnicalAccuracy = rawDims.technicalAccuracy ?? (
+    evaluated.length > 0
+      ? Math.round((evaluated.reduce((acc, q) => acc + (q.evaluation?.scores?.technicalAccuracy ?? q.evaluation?.dimensions?.technicalCorrectness?.score ?? q.evaluation?.score ?? 5), 0) / evaluated.length) * 10) / 10
+      : 0
+  );
+  const dimCompleteness = rawDims.completeness ?? (
+    evaluated.length > 0
+      ? Math.round((evaluated.reduce((acc, q) => acc + (q.evaluation?.scores?.completeness ?? q.evaluation?.dimensions?.completeness?.score ?? q.evaluation?.score ?? 5), 0) / evaluated.length) * 10) / 10
+      : 0
+  );
+  const dimDepth = rawDims.depth ?? (
+    evaluated.length > 0
+      ? Math.round((evaluated.reduce((acc, q) => acc + (q.evaluation?.scores?.depth ?? q.evaluation?.dimensions?.conceptualUnderstanding?.score ?? q.evaluation?.score ?? 5), 0) / evaluated.length) * 10) / 10
+      : 0
+  );
+  const dimClarity = rawDims.clarity ?? (
+    evaluated.length > 0
+      ? Math.round((evaluated.reduce((acc, q) => acc + (q.evaluation?.scores?.clarity ?? q.evaluation?.dimensions?.explanationClarity?.score ?? q.evaluation?.score ?? 5), 0) / evaluated.length) * 10) / 10
+      : 0
+  );
+  const dimCommunication = rawDims.communication ?? (
+    evaluated.length > 0
+      ? Math.round((evaluated.reduce((acc, q) => acc + (q.evaluation?.scores?.communication ?? q.evaluation?.dimensions?.relevance?.score ?? q.evaluation?.score ?? 5), 0) / evaluated.length) * 10) / 10
+      : 0
+  );
+
+  const dimensionList = [
+    { name: 'Technical Accuracy', score: dimTechnicalAccuracy, desc: 'Factual correctness, algorithms, API contracts & runtime models', color: '#38bdf8' },
+    { name: 'Completeness', score: dimCompleteness, desc: 'Rubric coverage, boundary conditions & missed edge cases', color: '#a855f7' },
+    { name: 'Depth', score: dimDepth, desc: 'Internal mechanics, memory trade-offs & scale implications', color: '#22c55e' },
+    { name: 'Clarity', score: dimClarity, desc: 'Concise, structured delivery without ambiguity or hesitation', color: '#eab308' },
+    { name: 'Communication', score: dimCommunication, desc: 'Professional vocabulary, rationale articulation & trade-off defense', color: '#f97316' }
+  ];
+
+  // Top Strengths & Top Weaknesses
+  const sessionStrengths = Array.isArray(interview.topStrengths) && interview.topStrengths.length > 0
+    ? interview.topStrengths
+    : [...new Set(evaluated.flatMap(q => q.evaluation?.strengths || []))].slice(0, 4);
+
+  const sessionWeaknesses = Array.isArray(interview.topWeaknesses) && interview.topWeaknesses.length > 0
+    ? interview.topWeaknesses
+    : [...new Set(evaluated.flatMap(q => [...(q.evaluation?.improvements || q.evaluation?.suggestions || []), ...(q.evaluation?.keyPointsMissed || [])]))].slice(0, 4);
 
   // Weak topics for revision recommendation
   const weakTopics = [...new Set(
@@ -306,6 +398,48 @@ const InterviewResults = () => {
           </div>
         )}
 
+        {/* Async AI Evaluation In-Progress Banner */}
+        {evalProgress.isPending && (
+          <div style={{
+            backgroundColor: 'rgba(56,189,248,0.1)',
+            border: '1px solid rgba(56,189,248,0.35)',
+            borderRadius: '12px',
+            padding: '16px 20px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '14px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <Loader2 size={20} className="animate-spin" color="var(--primary-color)" />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                  Refining Detailed AI Assessment...
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  Evaluation queue in progress: {evalProgress.evaluatedCount} of {evalProgress.totalAnswered || interview.questions?.length || 0} questions fully analyzed. Page auto-refreshes.
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--primary-color)' }}>
+                {Math.round(((evalProgress.evaluatedCount || 0) / Math.max(1, evalProgress.totalAnswered || 1)) * 100)}%
+              </span>
+              <div style={{ width: '120px', height: '6px', backgroundColor: 'var(--border-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${Math.round(((evalProgress.evaluatedCount || 0) / Math.max(1, evalProgress.totalAnswered || 1)) * 100)}%`,
+                  height: '100%',
+                  backgroundColor: 'var(--primary-color)',
+                  borderRadius: '3px',
+                  transition: 'width 0.4s ease'
+                }} />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Hero Score Card */}
         <div style={{
           backgroundColor: 'var(--bg-surface)',
@@ -354,11 +488,6 @@ const InterviewResults = () => {
               {interview.companyStyle && (
                 <span style={{ fontSize: '0.78rem', backgroundColor: 'rgba(56,189,248,0.12)', color: 'var(--primary-color)', padding: '3px 10px', borderRadius: '20px' }}>
                   <Shield size={11} style={{ display: 'inline', marginRight: '3px' }} />{interview.companyStyle}
-                </span>
-              )}
-              {interview.mode && (
-                <span style={{ fontSize: '0.78rem', backgroundColor: 'var(--bg-card-subtle)', color: 'var(--text-secondary)', padding: '3px 10px', borderRadius: '20px', border: '1px solid var(--border-subtle)' }}>
-                  {interview.mode === 'ai' ? '✦ Live AI Questions' : interview.mode === 'hybrid' ? '⚡ AI + Curated' : '📚 Curated Bank'}
                 </span>
               )}
             </div>
@@ -413,6 +542,72 @@ const InterviewResults = () => {
             </div>
           ))}
         </div>
+
+        {/* 5-Dimensional Competency Breakdown Chart */}
+        <div style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '14px', padding: '24px', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-primary)' }}>
+              <BarChart2 size={18} color="var(--primary-color)" /> 5-Dimensional Competency Profile
+            </div>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Evaluation across technical accuracy, completeness, depth, clarity & communication
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+            {dimensionList.map((dim, i) => {
+              const pct = Math.round((dim.score / 10) * 100);
+              return (
+                <div key={i} style={{ backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{dim.name}</span>
+                    <span style={{ fontSize: '0.88rem', fontWeight: 800, color: dim.color }}>{dim.score} / 10</span>
+                  </div>
+                  <div style={{ height: '7px', backgroundColor: 'var(--border-subtle)', borderRadius: '4px', overflow: 'hidden', marginBottom: '8px' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', backgroundColor: dim.color, borderRadius: '4px', transition: 'width 0.8s ease' }} />
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.35 }}>{dim.desc}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Summary of Top Strengths & Top Weaknesses */}
+        {(sessionStrengths.length > 0 || sessionWeaknesses.length > 0) && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+            {/* Top Strengths */}
+            <div style={{ backgroundColor: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: '14px', padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#16a34a', fontSize: '0.95rem', fontWeight: 700, marginBottom: '12px' }}>
+                <CheckCircle2 size={18} /> Top Candidate Strengths
+              </div>
+              {sessionStrengths.length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--text-primary)', fontSize: '0.84rem', lineHeight: 1.65 }}>
+                  {sessionStrengths.map((str, i) => (
+                    <li key={i} style={{ marginBottom: '6px' }}>{str}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted)' }}>Complete more questions to surface top strengths.</p>
+              )}
+            </div>
+
+            {/* Top Weaknesses */}
+            <div style={{ backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '14px', padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontSize: '0.95rem', fontWeight: 700, marginBottom: '12px' }}>
+                <AlertTriangle size={18} /> Key Focus Areas & Identified Gaps
+              </div>
+              {sessionWeaknesses.length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--text-primary)', fontSize: '0.84rem', lineHeight: 1.65 }}>
+                  {sessionWeaknesses.map((w, i) => (
+                    <li key={i} style={{ marginBottom: '6px' }}>{w}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p style={{ margin: 0, fontSize: '0.84rem', color: '#22c55e', fontWeight: 600 }}>No major technical gaps detected in this session!</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Score Distribution Bar Chart */}
         <div style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '14px', padding: '24px', marginBottom: '24px' }}>
@@ -637,6 +832,19 @@ const InterviewResults = () => {
                           🎯 Adaptive Follow-Up
                         </span>
                       )}
+                      {evalData.evaluatorLabel && (
+                        <span style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: evalData.isFallback || evalData.evaluatorLabel.includes('Basic') ? 'rgba(234,179,8,0.12)' : 'rgba(56,189,248,0.12)',
+                          color: evalData.isFallback || evalData.evaluatorLabel.includes('Basic') ? '#ca8a04' : '#38bdf8',
+                          border: `1px solid ${evalData.isFallback || evalData.evaluatorLabel.includes('Basic') ? 'rgba(234,179,8,0.3)' : 'rgba(56,189,248,0.25)'}`
+                        }}>
+                          {evalData.evaluatorLabel}
+                        </span>
+                      )}
                     </div>
 
                     {/* Question Text */}
@@ -786,7 +994,7 @@ const InterviewResults = () => {
                           </span>
                         </div>
                         <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.6 }}>
-                          {evalData.idealAnswer || q.referenceAnswer || 'Comprehensive architectural response demonstrating internal state and trade-offs.'}
+                          {evalData.betterAnswer || evalData.idealAnswer || q.referenceAnswer || 'Comprehensive architectural response demonstrating internal state and trade-offs.'}
                         </p>
 
                         {/* Expected Key Points Checklist */}
@@ -805,8 +1013,49 @@ const InterviewResults = () => {
                       </div>
                     </div>
 
-                    {/* Misconceptions & Corrections Detected (if any) */}
-                    {Array.isArray(evalData.incorrectStatements) && evalData.incorrectStatements.length > 0 && (
+                    {/* Covered vs Missed Points Detailed Grid */}
+                    {((Array.isArray(evalData.keyPointsCovered) && evalData.keyPointsCovered.length > 0) ||
+                      (Array.isArray(evalData.keyPointsMissed) && evalData.keyPointsMissed.length > 0)) && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+                        <div style={{ backgroundColor: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: '10px', padding: '14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#16a34a', fontSize: '0.82rem', fontWeight: 700, marginBottom: '8px' }}>
+                            <CheckCircle2 size={16} /> Covered Key Points ({evalData.keyPointsCovered?.length || 0})
+                          </div>
+                          {Array.isArray(evalData.keyPointsCovered) && evalData.keyPointsCovered.length > 0 ? (
+                            <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--text-primary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
+                              {evalData.keyPointsCovered.map((pt, i) => (
+                                <li key={i} style={{ color: '#22c55e', marginBottom: '2px' }}>
+                                  <span style={{ color: 'var(--text-primary)' }}>{pt}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>No core key points clearly articulated.</p>
+                          )}
+                        </div>
+
+                        <div style={{ backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '10px', padding: '14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#dc2626', fontSize: '0.82rem', fontWeight: 700, marginBottom: '8px' }}>
+                            <XCircle size={16} /> Missed Key Points ({evalData.keyPointsMissed?.length || 0})
+                          </div>
+                          {Array.isArray(evalData.keyPointsMissed) && evalData.keyPointsMissed.length > 0 ? (
+                            <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--text-primary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
+                              {evalData.keyPointsMissed.map((pt, i) => (
+                                <li key={i} style={{ color: '#ef4444', marginBottom: '2px' }}>
+                                  <span style={{ color: 'var(--text-primary)' }}>{pt}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p style={{ margin: 0, fontSize: '0.8rem', color: '#22c55e', fontWeight: 600 }}>All core key points successfully covered!</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Mistakes & Misconceptions Detected */}
+                    {((Array.isArray(evalData.mistakes) && evalData.mistakes.length > 0) ||
+                      (Array.isArray(evalData.incorrectStatements) && evalData.incorrectStatements.length > 0)) && (
                       <div style={{
                         backgroundColor: 'rgba(239,68,68,0.08)',
                         border: '1px solid rgba(239,68,68,0.3)',
@@ -814,15 +1063,15 @@ const InterviewResults = () => {
                         padding: '16px'
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontSize: '0.84rem', fontWeight: 700, marginBottom: '10px' }}>
-                          <AlertTriangle size={16} /> Misconceptions & Incorrect Statements Detected
+                          <AlertTriangle size={16} /> Mistakes & Misconceptions Detected
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {evalData.incorrectStatements.map((stmt, i) => {
+                          {(evalData.mistakes || evalData.incorrectStatements).map((stmt, i) => {
                             const corr = evalData.corrections?.[i];
                             return (
                               <div key={i} style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '10px 14px', fontSize: '0.82rem' }}>
                                 <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '4px' }}>
-                                  ⚠️ Incorrect Claim: {stmt}
+                                  ⚠️ Incorrect Statement: {stmt}
                                 </div>
                                 {corr && (
                                   <div style={{ color: '#22c55e', fontWeight: 500 }}>
@@ -1005,6 +1254,20 @@ const InterviewResults = () => {
                         </button>
                       </div>
                     )}
+
+                    {/* Direct Topic Practice Action */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-start', paddingTop: '4px' }}>
+                      <Button
+                        variant="secondary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/interview/setup?category=${encodeURIComponent(interview.category)}&topic=${encodeURIComponent(q.topic || interview.category)}`);
+                        }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', padding: '7px 16px' }}
+                      >
+                        <RotateCcw size={13} /> Practice this topic again ({q.topic || interview.category})
+                      </Button>
+                    </div>
 
                   </div>
                 )}

@@ -373,13 +373,20 @@ const Dashboard = () => {
                 <TrendingUp size={17} style={{ color: 'var(--primary-text)' }} />
                 <span>Recent Completed Mocks</span>
               </h2>
-              <span style={{ 
-                fontSize: '0.75rem', 
-                color: 'var(--text-muted)',
-                fontWeight: 500
-              }}>
-                Performance History
-              </span>
+              <Link
+                to="/history"
+                style={{ 
+                  fontSize: '0.78rem', 
+                  color: 'var(--primary-text)',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                View Full History →
+              </Link>
             </div>
 
             {/* List of Recent Completed Mocks */}

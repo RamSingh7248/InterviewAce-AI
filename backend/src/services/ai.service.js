@@ -839,10 +839,15 @@ Ensure output is valid JSON array [ ... ].`;
   };
 };
 
+// In-memory evaluation cache to avoid duplicate LLM calls on identical answers
+const evaluationCache = new Map();
+
 /**
  * Evaluate Candidate Answer via Gemini AI or Heuristic Rubric
  */
-export const evaluateAnswer = async (args = {}) => {
+export const evaluateAnswer = async (args = {}, options = {}) => {
+  const { forceHeuristic = false, forceAI = false } = options;
+  const startTime = Date.now();
   const question = args.question || {};
   const questionText = args.questionText || question.questionText || '';
   const expectedKeyPoints = args.expectedKeyPoints || question.expectedKeyPoints || [];
@@ -1019,10 +1024,18 @@ export const evaluateAnswer = async (args = {}) => {
                   companyStyle?.toLowerCase()?.includes('enterprise') ? 'enterprise' : 'general';
   const companyGuide = companyGuidelines[compKey] || companyGuidelines.general;
 
+  // Cache lookup for duplicate queries
+  const cacheKey = `${question.questionId || questionText}_${trimmed.toLowerCase()}`;
+  if (!forceHeuristic && evaluationCache.has(cacheKey)) {
+    const cached = evaluationCache.get(cacheKey);
+    console.log(`[AI Evaluation Cache Hit] Returning cached evaluation in ${Date.now() - startTime}ms`);
+    return JSON.parse(JSON.stringify(cached));
+  }
+
   // 7. Live Gemini AI Evaluation
   const apiKey = process.env.GEMINI_API_KEY;
 
-  if (apiKey && apiKey.trim().length > 10) {
+  if (!forceHeuristic && apiKey && apiKey.trim().length > 10) {
     try {
       const historyContextText = Array.isArray(conversationHistory) && conversationHistory.length > 0
         ? `\nPREVIOUS INTERVIEW CONTEXT (Conversation History so far):
@@ -1053,9 +1066,10 @@ CRITICAL RULES:
 - Ground your evaluation strictly in what the candidate actually wrote or spoke.
 - Do NOT give a high score merely because the answer is long.
 - Do NOT penalize a correct answer simply because it uses different wording from the reference answer.
-- If incorrect claims or misconceptions are made, identify each one under "incorrectStatements" and provide the exact correction under "corrections". If none, return empty arrays.
-- Score each of the 6 evaluation dimensions on a scale from 0 to 10.
-- Label reference answers clearly as examples, not as guaranteed official answers.
+- Identify covered expected key points in "keyPointsCovered", missed expected key points in "keyPointsMissed".
+- If incorrect claims or misconceptions are made, identify each one under "mistakes" (and "incorrectStatements").
+- Provide a concise model answer in simple words under "betterAnswer".
+- Score dimensions on a scale from 0 to 10 (technicalAccuracy, completeness, depth, clarity, communication).
 
 Question Asked: ${questionText}
 Expected Key Points: ${JSON.stringify(expectedKeyPoints)}
@@ -1064,16 +1078,25 @@ Candidate's Submitted Answer: "${userAnswer}"
 
 Return ONLY valid JSON matching this schema:
 {
+  "overallScore": 8.5,
+  "scores": {
+    "technicalAccuracy": 8.5,
+    "completeness": 8.0,
+    "depth": 8.0,
+    "clarity": 9.0,
+    "communication": 8.5
+  },
+  "keyPointsCovered": ["1-3 key points successfully addressed by candidate"],
+  "keyPointsMissed": ["1-3 expected key points missed or incomplete"],
+  "mistakes": ["exact false statements or misconceptions made by candidate, or empty array"],
+  "strengths": ["1-3 specific strengths grounded in candidate response"],
+  "improvements": ["1-2 actionable improvement recommendations"],
+  "betterAnswer": "Concise model answer in simple words explaining core mechanism and trade-offs",
+  "confidence": 0.92,
   "feedback": "Concise 1-2 sentence executive summary of candidate answer quality",
   "verdict": "correct",
   "depthRating": "adequate",
   "accuracyRating": "mostly_accurate",
-  "strengths": ["1-3 specific strengths grounded in candidate response"],
-  "missingConcepts": ["1-3 missing concepts or edge cases appropriate for this level"],
-  "incorrectStatements": ["exact false claims made by candidate, or empty array if none"],
-  "corrections": ["exact corrections corresponding to false claims, or empty array if none"],
-  "suggestions": ["1-2 actionable improvement recommendations"],
-  "idealAnswer": "Well-structured 2-4 sentence illustrative model answer",
   "practicalExample": "Practical production scenario demonstrating the concept in ${category}",
   "followUpQuestions": ["2 deep-dive follow-up questions testing deeper understanding"],
   "revisionTopics": ["1-3 topic names linked to ${category} catalog"],
@@ -1092,55 +1115,54 @@ Return ONLY valid JSON matching this schema:
       if (evalResult && typeof evalResult === 'object') {
         const validVerdicts = ['correct', 'partially_correct', 'incorrect', 'unclear', 'empty'];
         
-        // Extract and validate dimensions
-        const rawDims = evalResult.dimensions || {};
         const clampScore = (v, defaultVal = 5) => {
           const num = Number(v);
           return isNaN(num) ? defaultVal : Math.min(10, Math.max(0, Math.round(num * 10) / 10));
         };
 
+        const rawDims = evalResult.dimensions || {};
         const dimensions = {
           technicalCorrectness: {
-            score: clampScore(rawDims.technicalCorrectness?.score, 6),
+            score: clampScore(rawDims.technicalCorrectness?.score ?? evalResult.scores?.technicalAccuracy, 6),
             maxScore: 10,
             feedback: rawDims.technicalCorrectness?.feedback || 'Accurate technical terminology and core principles.'
           },
           relevance: {
-            score: clampScore(rawDims.relevance?.score, 7),
+            score: clampScore(rawDims.relevance?.score ?? evalResult.scores?.communication, 7),
             maxScore: 10,
             feedback: rawDims.relevance?.feedback || 'Directly addresses the prompt.'
           },
           conceptualUnderstanding: {
-            score: clampScore(rawDims.conceptualUnderstanding?.score, 6),
+            score: clampScore(rawDims.conceptualUnderstanding?.score ?? evalResult.scores?.depth, 6),
             maxScore: 10,
             feedback: rawDims.conceptualUnderstanding?.feedback || 'Demonstrates understanding of underlying mechanics.'
           },
           completeness: {
-            score: clampScore(rawDims.completeness?.score, 5),
+            score: clampScore(rawDims.completeness?.score ?? evalResult.scores?.completeness, 5),
             maxScore: 10,
             feedback: rawDims.completeness?.feedback || 'Addresses key conceptual areas.'
           },
           explanationClarity: {
-            score: clampScore(rawDims.explanationClarity?.score, 7),
+            score: clampScore(rawDims.explanationClarity?.score ?? evalResult.scores?.clarity, 7),
             maxScore: 10,
             feedback: rawDims.explanationClarity?.feedback || 'Structured technical communication.'
           },
           practicalApplication: {
-            score: clampScore(rawDims.practicalApplication?.score, 6),
+            score: clampScore(rawDims.practicalApplication?.score ?? evalResult.scores?.depth, 6),
             maxScore: 10,
             feedback: rawDims.practicalApplication?.feedback || 'Relevant production considerations.'
           }
         };
 
         // Weighted dimensional score calculation
-        const calculatedScore = Math.min(10, Math.max(0, Math.round((
+        const calculatedScore = clampScore(evalResult.overallScore ?? (
           dimensions.technicalCorrectness.score * 0.25 +
           dimensions.relevance.score * 0.15 +
           dimensions.conceptualUnderstanding.score * 0.20 +
           dimensions.completeness.score * 0.15 +
           dimensions.explanationClarity.score * 0.10 +
           dimensions.practicalApplication.score * 0.15
-        ) * 10) / 10));
+        ), 5);
 
         const score100 = Math.round(calculatedScore * 10);
 
@@ -1148,24 +1170,58 @@ Return ONLY valid JSON matching this schema:
           ? evalResult.verdict
           : (calculatedScore >= 7.5 ? 'correct' : calculatedScore >= 4.5 ? 'partially_correct' : 'incorrect');
 
+        const scores = {
+          technicalAccuracy: clampScore(evalResult.scores?.technicalAccuracy ?? dimensions.technicalCorrectness.score, 6),
+          completeness: clampScore(evalResult.scores?.completeness ?? dimensions.completeness.score, 6),
+          depth: clampScore(evalResult.scores?.depth ?? dimensions.conceptualUnderstanding.score, 6),
+          clarity: clampScore(evalResult.scores?.clarity ?? dimensions.explanationClarity.score, 6),
+          communication: clampScore(evalResult.scores?.communication ?? dimensions.relevance.score, 6)
+        };
+
+        const keyPointsCovered = Array.isArray(evalResult.keyPointsCovered) ? evalResult.keyPointsCovered : [];
+        const keyPointsMissed = Array.isArray(evalResult.keyPointsMissed)
+          ? evalResult.keyPointsMissed
+          : (Array.isArray(evalResult.missingConcepts) ? evalResult.missingConcepts : []);
+
+        const mistakes = Array.isArray(evalResult.mistakes)
+          ? evalResult.mistakes
+          : (Array.isArray(evalResult.incorrectStatements) ? evalResult.incorrectStatements : []);
+
+        const strengths = Array.isArray(evalResult.strengths) && evalResult.strengths.length > 0
+          ? evalResult.strengths
+          : ['Demonstrated valid technical intent and relevant terminology.'];
+
+        const improvements = Array.isArray(evalResult.improvements) && evalResult.improvements.length > 0
+          ? evalResult.improvements
+          : (Array.isArray(evalResult.suggestions) && evalResult.suggestions.length > 0 ? evalResult.suggestions : [`Continue refining production trade-offs in ${category}.`]);
+
+        const betterAnswer = evalResult.betterAnswer || evalResult.idealAnswer || referenceAnswer || (expectedKeyPoints.length > 0 ? expectedKeyPoints.join('. ') : '');
+        const confidence = typeof evalResult.confidence === 'number' ? Math.min(1, Math.max(0, evalResult.confidence)) : 0.92;
+
         const geminiOutput = {
+          overallScore: calculatedScore,
           score: calculatedScore,
           score100,
+          scores,
+          keyPointsCovered,
+          keyPointsMissed,
+          mistakes,
+          strengths,
+          improvements,
+          betterAnswer,
+          confidence,
+          evaluatorLabel: 'AI Evaluation',
+          isFallback: false,
           evaluationStatus: 'evaluated',
           verdict: derivedVerdict,
           depthRating: evalResult.depthRating || (calculatedScore >= 7 ? 'in-depth' : calculatedScore >= 4 ? 'adequate' : 'superficial'),
           accuracyRating: evalResult.accuracyRating || (calculatedScore >= 7 ? 'accurate' : calculatedScore >= 4 ? 'mostly_accurate' : 'misconceptions'),
           feedback: evalResult.feedback || `Answer evaluated for ${targetRole} (${experienceLevel}).`,
-          strengths: Array.isArray(evalResult.strengths) && evalResult.strengths.length > 0
-            ? evalResult.strengths
-            : ['Demonstrated valid technical intent and relevant terminology.'],
-          missingConcepts: Array.isArray(evalResult.missingConcepts) ? evalResult.missingConcepts : [],
-          incorrectStatements: Array.isArray(evalResult.incorrectStatements) ? evalResult.incorrectStatements : [],
+          missingConcepts: keyPointsMissed,
+          incorrectStatements: mistakes,
           corrections: Array.isArray(evalResult.corrections) ? evalResult.corrections : [],
-          suggestions: Array.isArray(evalResult.suggestions) && evalResult.suggestions.length > 0
-            ? evalResult.suggestions
-            : [`Continue refining production trade-offs and edge case analysis in ${category}.`],
-          idealAnswer: evalResult.idealAnswer || referenceAnswer || expectedKeyPoints.join('. '),
+          suggestions: improvements,
+          idealAnswer: betterAnswer,
           practicalExample: evalResult.practicalExample || defaultPracticalExample,
           followUpQuestions: Array.isArray(evalResult.followUpQuestions) && evalResult.followUpQuestions.length > 0
             ? evalResult.followUpQuestions.slice(0, 2)
@@ -1176,7 +1232,10 @@ Return ONLY valid JSON matching this schema:
           dimensions
         };
 
-        return isHindi ? localizeEvaluationToHindi(geminiOutput) : geminiOutput;
+        const finalRes = isHindi ? localizeEvaluationToHindi(geminiOutput) : geminiOutput;
+        evaluationCache.set(cacheKey, finalRes);
+        console.log(`[AI Evaluation] Finished in ${Date.now() - startTime}ms | Evaluator: AI Evaluation | Score: ${calculatedScore}/10`);
+        return finalRes;
       }
     } catch (err) {
       console.warn('[AI Evaluation Warning] Live Gemini evaluation failed, falling back to rubric evaluation:', err.message);
@@ -1184,9 +1243,9 @@ Return ONLY valid JSON matching this schema:
   }
 
   // 8. Heuristic Rubric Evaluation for Demo / Offline Mode
-  let matchedPoints = 0;
+  const keyPointsCovered = [];
+  const keyPointsMissed = [];
   const strengths = [];
-  const missing = [];
   const suggestions = [];
 
   for (const kp of expectedKeyPoints) {
@@ -1194,9 +1253,9 @@ Return ONLY valid JSON matching this schema:
     const keywords = cleanedKp.split(/\s+/).filter(w => w.length > 2);
     const matches = keywords.filter(k => lowerAnswer.includes(k));
     if (keywords.length > 0 && matches.length >= Math.ceil(keywords.length * 0.25)) {
-      matchedPoints++;
+      keyPointsCovered.push(kp);
     } else {
-      missing.push(kp);
+      keyPointsMissed.push(kp);
     }
   }
 
@@ -1274,6 +1333,7 @@ Return ONLY valid JSON matching this schema:
   const isJuniorOrFresher = normExp === 'junior' || normExp === 'fresher' || normExp === 'entry' || (targetRole && targetRole.toLowerCase().includes('junior'));
   const isSeniorOrLead = normExp === 'senior' || normExp === 'lead' || normExp === 'principal' || (targetRole && (targetRole.toLowerCase().includes('senior') || targetRole.toLowerCase().includes('lead')));
 
+  const matchedPoints = keyPointsCovered.length;
   const answerMatchRatio = expectedKeyPoints.length > 0
     ? (matchedPoints / expectedKeyPoints.length)
     : (words.length >= 35 ? 0.8 : words.length >= 15 ? 0.6 : 0.4);
@@ -1321,21 +1381,21 @@ Return ONLY valid JSON matching this schema:
   // Mode-specific checks
   if (interviewMode === 'coding' || interviewMode === 'live_coding' || category.toLowerCase().includes('dsa')) {
     if (!lowerAnswer.includes('o(') && !lowerAnswer.includes('time') && !lowerAnswer.includes('complexity')) {
-      missing.push('Time and space complexity analysis (Big-O)');
+      keyPointsMissed.push('Time and space complexity analysis (Big-O)');
       suggestions.push('Always state the time and space complexity (Big-O) of your approach.');
     } else {
       strengths.push('Addressed algorithmic complexity (Big-O).');
     }
   } else if (interviewMode === 'sql' || category.toLowerCase().includes('sql') || category.toLowerCase().includes('dbms')) {
     if (!lowerAnswer.includes('index') && !lowerAnswer.includes('join') && !lowerAnswer.includes('table') && !lowerAnswer.includes('query')) {
-      missing.push('SQL query logic, table joins, and indexing considerations');
+      keyPointsMissed.push('SQL query logic, table joins, and indexing considerations');
       suggestions.push('Discuss indexing, query execution efficiency, and join mechanics for relational databases.');
     } else {
       strengths.push('Included database query and indexing context.');
     }
   } else if (interviewMode === 'system_design' || category.toLowerCase().includes('system')) {
     if (!lowerAnswer.includes('cache') && !lowerAnswer.includes('scale') && !lowerAnswer.includes('database')) {
-      missing.push('Scalability, caching, and storage architecture considerations');
+      keyPointsMissed.push('Scalability, caching, and storage architecture considerations');
       suggestions.push('Address scalability bottlenecks, caching layer, and data consistency models.');
     } else {
       strengths.push('Incorporated distributed architecture and scalability factors.');
@@ -1345,19 +1405,17 @@ Return ONLY valid JSON matching this schema:
   if (matchedPoints > 0) {
     strengths.push(`Addressed core concepts relevant to ${category} (${targetRole}).`);
   }
-  if (missing.length === 0 && expectedKeyPoints.length > 0) {
+  if (keyPointsMissed.length === 0 && expectedKeyPoints.length > 0) {
     strengths.push('Covered all key expected conceptual points.');
   }
 
   // Factor in detected misconceptions
   if (detectedIncorrect.length > 0) {
-    matchedPoints = Math.max(0, matchedPoints - detectedIncorrect.length * 2);
     if (detectedIncorrect.length >= 2 || (detectedIncorrect.length >= 1 && words.length < 40)) {
       baseScore = Math.min(baseScore, 2);
     } else {
       baseScore = Math.min(baseScore, 4);
     }
-    missing.push(...detectedIncorrect);
     suggestions.push(`Review core definitions: ${detectedIncorrect.join('; ')}.`);
   }
 
@@ -1374,11 +1432,11 @@ Return ONLY valid JSON matching this schema:
   } else if (detectedIncorrect.length === 1) {
     verdict = 'partially_correct';
     accuracyRating = 'misconceptions';
-  } else if (baseScore >= 8 && missing.length === 0) {
+  } else if (baseScore >= 8 && keyPointsMissed.length === 0) {
     verdict = 'correct';
     depthRating = 'in-depth';
     accuracyRating = 'accurate';
-  } else if (baseScore >= 7 && missing.length <= 1) {
+  } else if (baseScore >= 7 && keyPointsMissed.length <= 1) {
     verdict = 'correct';
     accuracyRating = 'accurate';
   } else if (baseScore < 4) {
@@ -1406,73 +1464,66 @@ Return ONLY valid JSON matching this schema:
     practicalScore = Math.min(practicalScore, 3);
   }
 
-  const dimensions = {
-    technicalCorrectness: {
-      score: techScore,
-      maxScore: 10,
-      feedback: detectedIncorrect.length > 0
-        ? `Contains misconceptions: ${detectedIncorrect.join(', ')}`
-        : 'Demonstrates solid technical terminology and factual grounding.'
-    },
-    relevance: {
-      score: relevanceScore,
-      maxScore: 10,
-      feedback: 'Addressed the core aspects of the interview question.'
-    },
-    conceptualUnderstanding: {
-      score: conceptScore,
-      maxScore: 10,
-      feedback: 'Reflects understanding of mechanical and structural principles.'
-    },
-    completeness: {
-      score: completeScore,
-      maxScore: 10,
-      feedback: `Addressed ${matchedPoints} of ${Math.max(1, expectedKeyPoints.length)} expected key evaluation points.`
-    },
-    explanationClarity: {
-      score: clarityScore,
-      maxScore: 10,
-      feedback: 'Cohesive technical explanation appropriate for interview standards.'
-    },
-    practicalApplication: {
-      score: practicalScore,
-      maxScore: 10,
-      feedback: 'Consideration of real-world mechanics and production trade-offs.'
-    }
+  const scores = {
+    technicalAccuracy: techScore,
+    completeness: completeScore,
+    depth: conceptScore,
+    clarity: clarityScore,
+    communication: relevanceScore
   };
 
   const calculatedScore = Math.min(10, Math.max(1, Math.round((
-    dimensions.technicalCorrectness.score * 0.25 +
-    dimensions.relevance.score * 0.15 +
-    dimensions.conceptualUnderstanding.score * 0.20 +
-    dimensions.completeness.score * 0.15 +
-    dimensions.explanationClarity.score * 0.10 +
-    dimensions.practicalApplication.score * 0.15
+    scores.technicalAccuracy * 0.30 +
+    scores.completeness * 0.25 +
+    scores.depth * 0.20 +
+    scores.clarity * 0.15 +
+    scores.communication * 0.10
   ) * 10) / 10));
 
   const score100 = Math.round(calculatedScore * 10);
 
+  const betterAnswer = referenceAnswer || (expectedKeyPoints.length > 0 ? expectedKeyPoints.join('. ') : `A solid response in ${category} clearly defines the mechanism, trade-offs, and boundary conditions.`);
+
   const evalResult = {
+    overallScore: calculatedScore,
     score: calculatedScore,
     score100,
+    scores,
+    keyPointsCovered,
+    keyPointsMissed,
+    mistakes: detectedIncorrect,
+    strengths: strengths.length > 0 ? strengths : ['Attempted response with valid technical direction.'],
+    improvements: suggestions.length > 0 ? suggestions : [`Include concrete code or architectural patterns relevant to ${targetRole}.`],
+    betterAnswer,
+    confidence: 0.75,
+    evaluatorLabel: 'Basic evaluation (AI unavailable)',
+    isFallback: true,
     evaluationStatus: 'evaluated',
     verdict,
     depthRating,
     accuracyRating,
-    feedback: `Technical answer evaluated against ${experienceLevel.toUpperCase()} ${targetRole} standards (${category} Technical Rubric Assessment).`,
-    strengths: strengths.length > 0 ? strengths : ['Attempted response with valid technical direction.'],
-    missingConcepts: missing.length > 0 ? missing : ['Consider discussing time/space complexity or production trade-offs.'],
+    feedback: `Technical answer evaluated against ${experienceLevel.toUpperCase()} ${targetRole} standards (Basic evaluation - AI unavailable).`,
+    missingConcepts: keyPointsMissed,
     incorrectStatements: detectedIncorrect,
     corrections: detectedCorrections,
-    suggestions: suggestions.length > 0 ? suggestions : [`Include concrete code or architectural patterns relevant to ${targetRole}.`],
-    idealAnswer: referenceAnswer || (expectedKeyPoints.length > 0 ? expectedKeyPoints.join('. ') : `A ${experienceLevel} ${targetRole} would explain the core mechanism, complexity, and practical production trade-offs.`),
+    suggestions,
+    idealAnswer: betterAnswer,
     practicalExample: defaultPracticalExample,
     followUpQuestions: defaultFollowUps,
     revisionTopics: defaultRevisionTopics,
-    dimensions
+    dimensions: {
+      technicalCorrectness: { score: techScore, maxScore: 10, feedback: detectedIncorrect.length > 0 ? `Contains misconceptions: ${detectedIncorrect.join(', ')}` : 'Demonstrates solid technical terminology.' },
+      relevance: { score: relevanceScore, maxScore: 10, feedback: 'Addressed the core aspects of the interview question.' },
+      conceptualUnderstanding: { score: conceptScore, maxScore: 10, feedback: 'Reflects understanding of mechanical and structural principles.' },
+      completeness: { score: completeScore, maxScore: 10, feedback: `Addressed ${matchedPoints} of ${Math.max(1, expectedKeyPoints.length)} expected key evaluation points.` },
+      explanationClarity: { score: clarityScore, maxScore: 10, feedback: 'Cohesive technical explanation.' },
+      practicalApplication: { score: practicalScore, maxScore: 10, feedback: 'Consideration of real-world mechanics and production trade-offs.' }
+    }
   };
 
-  return isHindi ? localizeEvaluationToHindi(evalResult) : evalResult;
+  const finalRes = isHindi ? localizeEvaluationToHindi(evalResult) : evalResult;
+  console.log(`[AI Evaluation] Finished in ${Date.now() - startTime}ms | Evaluator: Basic evaluation (AI unavailable) | Score: ${calculatedScore}/10`);
+  return finalRes;
 };
 
 /**

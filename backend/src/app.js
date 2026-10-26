@@ -18,13 +18,29 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const clientDistPath = path.resolve(__dirname, '../../client/dist');
+const candidateDistPaths = [
+  process.env.CLIENT_DIST_PATH,
+  path.resolve(__dirname, '../../client/dist'),
+  path.resolve(process.cwd(), 'client/dist'),
+  path.resolve(process.cwd(), '../client/dist'),
+  path.resolve(process.cwd(), 'dist')
+].filter(Boolean);
+
+export const resolveClientDist = () => {
+  for (const candidate of candidateDistPaths) {
+    if (fs.existsSync(path.join(candidate, 'index.html'))) {
+      return candidate;
+    }
+  }
+  return path.resolve(__dirname, '../../client/dist');
+};
 
 const app = express();
 
 // CORS Configuration with Credentials support
 const allowedOrigins = [
   process.env.CLIENT_ORIGIN,
+  process.env.RENDER_EXTERNAL_URL,
   'http://localhost:5173',
   'http://localhost:5000',
   'http://localhost:5001',
@@ -46,7 +62,6 @@ app.use(cors({
   credentials: true,
 }));
 
-
 // Body and Cookie Parsers
 app.use(express.json());
 app.use(cookieParser());
@@ -61,11 +76,14 @@ app.get('/api/health', (req, res) => {
   };
 
   const dbStatus = dbStates[mongoose.connection.readyState] || 'unknown';
+  const activeDist = resolveClientDist();
+  const frontendReady = fs.existsSync(path.join(activeDist, 'index.html'));
 
   res.status(200).json({
     status: 'ok',
     service: 'InterviewAce AI Backend API',
     database: dbStatus,
+    frontend: frontendReady ? 'ready' : 'missing',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString()
   });
@@ -94,23 +112,46 @@ app.all('/api/*', (req, res) => {
   });
 });
 
-// Serve frontend client build in single-host mode
-if (fs.existsSync(clientDistPath)) {
-  app.use(express.static(clientDistPath));
+// Serve static assets from the resolved client build folder dynamically
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  const activeDist = resolveClientDist();
+  return express.static(activeDist, { index: false })(req, res, next);
+});
 
-  // SPA fallback for all web page routes
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(clientDistPath, 'index.html'));
+// Serve root route "/" directly with index.html
+app.get('/', (req, res) => {
+  const activeDist = resolveClientDist();
+  const activeIndex = path.join(activeDist, 'index.html');
+  if (fs.existsSync(activeIndex)) {
+    return res.sendFile(activeIndex);
+  }
+  return res.status(404).json({
+    status: 'error',
+    message: `Frontend build not found at ${activeDist}. Ensure 'npm run build' was executed in client directory.`,
+    searchedPaths: candidateDistPaths
   });
-} else {
-  // Fallback 404 handler if dist is not built yet
-  app.use((req, res) => {
-    res.status(404).json({
-      status: 'error',
-      message: `Frontend build not found at ${clientDistPath}. Run 'npm run build' in client directory.`
-    });
+});
+
+// SPA fallback for all web page routes
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+
+  const activeDist = resolveClientDist();
+  const activeIndex = path.join(activeDist, 'index.html');
+  if (fs.existsSync(activeIndex)) {
+    return res.sendFile(activeIndex);
+  }
+  return res.status(404).json({
+    status: 'error',
+    message: `Frontend build not found at ${activeDist}. Ensure 'npm run build' was executed in client directory.`,
+    searchedPaths: candidateDistPaths
   });
-}
+});
 
 // Global Error Handler
 app.use((err, req, res, next) => {

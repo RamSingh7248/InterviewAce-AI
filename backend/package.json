@@ -19,7 +19,8 @@
     "test:microphone": "node src/scripts/testPhase4Microphone.js",
     "test:bugfixes": "node src/scripts/testBugFixesCameraAndLanguage.js",
     "test:lifecycle": "node src/scripts/testInterviewRoomLifecycle.js",
-    "test:feedback": "node src/scripts/testDetailedFeedbackEvaluation.js"
+    "test:feedback": "node src/scripts/testDetailedFeedbackEvaluation.js",
+    "test:production": "node src/scripts/testProductionRoutes.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -1,7 +1,7 @@
 import app from './app.js';
 import connectDB from './config/database.js';
 
-const PORT = process.env.PORT || 5001;
+const PORT = parseInt(process.env.PORT, 10) || 5001;
 const HOST = '0.0.0.0';
 
 // Initialize Database connection then start the HTTP server

@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: interviewace-ai
+    env: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

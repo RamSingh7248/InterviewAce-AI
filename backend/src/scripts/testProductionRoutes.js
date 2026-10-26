@@ -44,7 +44,7 @@ const runTests = async () => {
     assert(rootRes.body.includes('<div id="root"></div>') || rootRes.body.includes('<!DOCTYPE html>'), 'Root must return index.html');
     console.log('  [PASS] Root route GET / successfully serves index.html with HTTP 200');
 
-    // 2. SPA Route Fallback "/interview/setup"
+    // 2. SPA Route Fallback "/interview/setup" & "/login"
     console.log('\n[Test 2] SPA Fallback Route GET /interview/setup:');
     const spaRes = await fetchUrl('/interview/setup');
     console.log('SPA response status:', spaRes.status, 'headers:', spaRes.headers, 'body length:', spaRes.body.length, 'preview:', spaRes.body.slice(0, 100));
@@ -52,6 +52,13 @@ const runTests = async () => {
     assert(spaRes.headers['content-type'].includes('text/html'), 'Content-type must be text/html');
     assert(spaRes.body.includes('<!DOCTYPE html>') || spaRes.body.includes('<html'), 'SPA route must return index.html');
     console.log('  [PASS] SPA Route GET /interview/setup successfully falls back to index.html with HTTP 200');
+
+    console.log('\n[Test 2a] SPA Route GET /login:');
+    const loginRes = await fetchUrl('/login');
+    assert.strictEqual(loginRes.status, 200, `Expected 200, got ${loginRes.status}`);
+    assert(loginRes.headers['content-type'].includes('text/html'), 'Content-type must be text/html');
+    assert(loginRes.body.includes('<!DOCTYPE html>') || loginRes.body.includes('<html'), 'Login route must return index.html');
+    console.log('  [PASS] SPA Route GET /login successfully returns index.html with HTTP 200');
 
     // 2b. Static Assets (e.g. favicon.svg)
     console.log('\n[Test 2b] Static Asset GET /favicon.svg:');

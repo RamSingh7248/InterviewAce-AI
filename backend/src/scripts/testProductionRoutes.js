@@ -109,6 +109,39 @@ const runTests = async () => {
     assert.strictEqual(hasValidScheme(sanitizedInvalid), false, 'Invalid scheme without protocol must be rejected safely');
     console.log('  [PASS] URI sanitization safely handles quotes, whitespace, and validates schemes');
 
+    // 7. Express "trust proxy" Configuration & Rate Limiter with X-Forwarded-For Header
+    console.log('\n[Test 7] Express "trust proxy" & Rate Limiter with X-Forwarded-For Header:');
+    assert.strictEqual(app.get('trust proxy'), 1, 'Express trust proxy setting must be set to 1 for Render reverse proxy');
+    console.log('  [PASS] app.get("trust proxy") is correctly configured to 1');
+
+    // Perform an HTTP request simulating a proxy-forwarded request (as Render does)
+    const simulatedProxyRes = await new Promise((resolve, reject) => {
+      const payload = JSON.stringify({});
+      const req = http.request(`${baseUrl}/api/auth/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          'X-Forwarded-For': '198.51.100.42', // Simulated client IP forwarded by Render
+        }
+      }, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          resolve({ status: res.statusCode, headers: res.headers, body });
+        });
+      });
+      req.on('error', reject);
+      req.write(payload);
+      req.end();
+    });
+
+    // Rate limiter must execute without throwing ValidationError and return RateLimit headers
+    assert(simulatedProxyRes.headers['ratelimit-limit'], 'RateLimit-Limit header must be present');
+    assert(simulatedProxyRes.headers['ratelimit-remaining'], 'RateLimit-Remaining header must be present');
+    assert(simulatedProxyRes.status !== 500, 'Request with X-Forwarded-For must not throw server error');
+    console.log(`  [PASS] Rate limiter accepted X-Forwarded-For without error: RateLimit-Limit=${simulatedProxyRes.headers['ratelimit-limit']}, RateLimit-Remaining=${simulatedProxyRes.headers['ratelimit-remaining']}`);
+
     console.log('\n====================================================');
     console.log('   ALL PRODUCTION ROUTING & HEALTH TESTS PASSED!');
     console.log('====================================================');

@@ -37,6 +37,11 @@ export const resolveClientDist = () => {
 
 const app = express();
 
+// Trust the immediate front-facing reverse proxy (1 hop on Render / load balancers)
+// This safely extracts client IP from X-Forwarded-For without blindly trusting client-forged headers,
+// satisfying express-rate-limit validation requirements and correctly keying rate limits by client IP.
+app.set('trust proxy', 1);
+
 // CORS Configuration with Credentials support
 const allowedOrigins = [
   process.env.CLIENT_ORIGIN,
